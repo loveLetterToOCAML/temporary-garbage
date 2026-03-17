@@ -12,24 +12,46 @@ class SerialType(Enum):
     Communication = 6   # includes network related (routing), secure related, interaction (results, errors)
     SelfExecution = 7   # includes sup and inf execution context, self perception of current execution
 
-    Data = 10           # includes knowledge, filer, vault, cache, database, backup, structured logs intents
+    Data = 10           # includes knowledge, filer, vault, cache, database, backup, structured logs
     Action = 11
     Persist = 12
-    Config = 13
+    Config = 13         # consists of intent, policies and context controls for initial config parsing from external to internal API
     Context = 14
     Infra = 15
-    Visualization = 16
+    Logging = 16
+    Policy = 17         # consists of making available read-only objects that represent current centralized policies at any point in time
+    Visualization = 18
 
     Craft = 20
     Test = 21
     Replicate = 22
-    Understand = 23
-    Exploration = 24
+    Enumerate = 23
 
     ModelExternal = 30
     Instrument = 31
     Measure = 32
 
+    Understand = 40
+    Explore = 41
+
+    ExecutionSystem = 100
+
+    Other = 0xff
+
+
+class ExecutionSystemType(Enum):
+    PersistentData = 1   # includes knowledge, filer, vault, cache, database, backup
+    Infrastructure = 2   # includes install, infra modelling, infra state storage and resource management
+    History = 3
+    Search = 4
+    Social = 5
+
+    Enumerate = 20
+    Instrument = 21
+    ModelExternal = 22
+    Measure = 23
+
+    Other = 0xff
 
 class SerializationNode:
 
@@ -80,10 +102,7 @@ class Serial(SerializationNode):
 ### END AUTO GENERATION
 
 
-def register_serialization_context(TemplateType: Type, SubEnum: EnumType):
-    return TemplateType(SubEnum)
-
-Root: Serial = register_serialization_context(Serial, SerialType)
+Root = Serial(SerialType)
 
 
 if __name__ == '__main__':

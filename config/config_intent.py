@@ -13,6 +13,9 @@ class GetCurrentConfig(FromNodeModel):
 
 class GetConfigTemplateExample(FromNodeModel):
     withAllCasesForEnum: bool = True        # this prints all case values for enums with A | B | C syntax
+    withRandomForEnum: bool = False         # this chooses a random valid enum value between choices (withAllCasesForEnum has priority)
+    withAllCasesForUnion: bool = False      # this prints all union cases with syntax like [[or 1]]line ... [[or 2]]line
+    withRandomForUnion: bool = True         # this chooses a random valid type between union ones (can be null) (withAllCasesForUnion has priority)
     forceOptionalToInstances: bool = False  # this allows to print and develop every sub object which can be None otherwise
 
 class GetConfigTemplateTyping(FromNodeModel):

@@ -1,5 +1,5 @@
 # forced to split RootParams declaration from Root declaration to avoid circular dependency with BaseDataType
-from basetypes.ab_basetypes import BaseDataType
+from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root import Root
 
 from pydantic import BaseModel
@@ -8,7 +8,7 @@ from enum import Enum
 
 
 class RootSerial(BaseModel):
-    Type: BaseDataType.TYPE
+    Type: DefaultBaseType.TYPE
 
 # better explicit than implicit / dynamic: explicitly declare the attributes as params, do it for every subclass
 # 0 -> 0x10: precedence happens at child level
@@ -16,4 +16,4 @@ class RootSerial(BaseModel):
 class SerialParams(Enum):
     Type = 1
 
-RootParams = register_serialization_params_context(Root, SerialParams)
+#RootParams = register_serialization_params_context(Root, SerialParams)

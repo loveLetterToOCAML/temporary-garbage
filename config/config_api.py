@@ -13,7 +13,7 @@ class StructuredConfigApi(Protocol):
     Configuration child registration API: must give either a Subconfig Enum (in case it's some non-leaf config node
     which references other)
     or a BaseConfigAttributes Type which must be an extension of some pydantic BaseModel, in this case this may be a
-    config leaf with high chances
+    config leaf with high chances (or it's additional attributes that are shared by all children)
     """
     def register_child(
         self,

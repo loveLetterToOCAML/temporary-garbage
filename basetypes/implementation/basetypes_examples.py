@@ -24,8 +24,13 @@ from uuid import UUID
 from enum import Enum
 import ipaddress
 
+from basetypes.implementation.basetypes_match import DefaultBaseType
 
-def example_for_type(tp: Any) -> Any:
+
+t = DefaultBaseType.FLOAT(1.3)
+print(t)
+
+def example_for_type(tp: DefaultBaseType) -> Any:
     origin = get_origin(tp)
     args = get_args(tp)
 

@@ -1,61 +1,47 @@
-from pydantic import BaseModel
+from basetypes.a_root import SerializationNode, Root, SerialType
 
 from enum import Enum
 
-from basetypes.ab_basetypes import BaseTypes
+
+class GenericDataType(Enum):
+    DATA_STRUCTURE = 1
+    ALIAS = 2
 
 
-class GenericsDataType(Enum):
-    DataStructure = 1
-
-    AuthorityGenerics = 10
-    InteractionGenerics = 11
-    CommunicationGenerics = 12
-    #SelfExecutionGenerics = 13  # no self execution generics: execution is the location of "physical" reified things
-
-
-class GenericType(BaseModel):
-    type: bytes
-
-    @classmethod
-    @property
-    def name(cls):
-        return cls.__name__
+### BEGIN AUTO GENERATION
+# Auto-generated from GenericType for auto-completion purpose
+class GenericData(SerializationNode):
+    DATA_STRUCTURE = ...
+    ALIAS = ...
+### END AUTO GENERATION
 
 
-class BasePacket(BaseModel):
-    pass
+class DefaultDataStructureType(Enum):
+    LIST = 1
+    DICT = 2
+    TUPLE = 3
+
+    SIMPLE_TREE = 10
+    TREE = 11
 
 
-class DataCollection(BaseModel):
-    pass
+### BEGIN AUTO GENERATION
+# Auto-generated from DefaultDataStructureType for auto-completion purpose
+class DefaultDataStructure(SerializationNode):
+    LIST = ...
+    DICT = ...
+    TUPLE = ...
+    SIMPLE_TREE = ...
+    TREE = ...
+### END AUTO GENERATION
 
 
-class Dict(BaseModel):
-    keyType: GenericType
-    valueType: GenericType
+Generics: GenericData = Root.register_serialization_child(SerialType.GenericsData, GenericDataType)
 
-class DictInstance(BaseModel):
-    instanceOf: Dict
-    keyValues: list[tuple[BasePacket, BasePacket]]
+GenericDataStructure = Generics.register_serialization_child(GenericDataType.DATA_STRUCTURE, DefaultDataStructureType)
 
 
-class Tuple(BaseModel):
-    productTypes: list[GenericType]
-
-class TupleInstance(BaseModel):
-    instanceOf: Tuple
-    productInstances: list[BasePacket]
-
-
-
-class SimpleTree(BaseModel):
-    NodeType: BaseTypes.TYPE
-    root: NodeType
-
-
-class Tree(BaseModel):
-    NodeType: TypeInTree
-    LeafType: TypeInTree
-    root: NodeType
-
+if __name__ == '__main__':
+    from basetypes.autocomplete_helper import generate_autocompletion_for_enum
+    print(generate_autocompletion_for_enum(GenericDataType))
+    print(generate_autocompletion_for_enum(DefaultDataStructureType))

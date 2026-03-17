@@ -1,4 +1,5 @@
-from config.root_config import RootConfigType, RootConfigContext
+from config.root_config import RootConfigContext
+from basetypes.a_root import SerialType
 
 from enum import Enum
 
@@ -25,14 +26,15 @@ class PersistentDataExecutionSystemType(Enum):
     Cache = 4
     Database = 5
     Backup = 6
+    LogSink = 7
 
 
 ExecutionSystemConfigContext = RootConfigContext.register_child(
-    RootConfigType.ExecutionSystem,
+    SerialType.ExecutionSystem,
     SubconfigEnum=ExecutionSystemType
 )
 
 PersistentDataConfigContext = ExecutionSystemConfigContext.register_child(
-    ExecutionSystemType.PersistentData,
+    SerialType.PersistentData,
     SubconfigEnum=PersistentDataExecutionSystemType
 )

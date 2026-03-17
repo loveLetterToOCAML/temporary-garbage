@@ -1,3 +1,4 @@
+from basetypes.a_root import SerialType
 from config.config_context import ConfigContext
 
 from enum import Enum
@@ -22,4 +23,4 @@ class RootConfigType(Enum):
     ExecutionSystem = 100
 
 
-RootConfigContext = ConfigContext(RootConfigType)
+RootConfigContext = ConfigContext(SerialType)

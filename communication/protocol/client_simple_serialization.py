@@ -134,7 +134,7 @@ def serialize_int_with_constraint(swc: IntWithConstraint):
 
 
 class SerializationMethods:
-    NONE = serialize_none
+    BaseTypes = serialize_none
     BOOL = serialize_bool
     INT = serialize_int
     FLOAT = serialize_float
@@ -155,7 +155,7 @@ class SerializationMethods:
     INT_WITH_CONSTRAINT = serialize_int_with_constraint
 
 """
-To be correctly serialized, value must be of any type within DefaultBaseType or GenericType
+To be correctly serialized, value must be of any type within DefaultBaseType or DefaultGenericType
 """
 def serialize_one(value) -> bytes:
     match value:

@@ -104,15 +104,18 @@ class DefaultExternalSocialBaseType:
     COMPANY = str
 
 
-class DefaultExternalSocialBaseType:
-    EMAIL = Email
-    PHONE_NUMBER = PhoneNumber
-    SOCIAL_IDENTITY = SocialIdentity
-    SOCIAL_NUMBER = SocialNumber
-    COUNTRY_NAME = CountryName
-    COUNTRY_ALPHA = CountryShort
-    ADDRESS = Address
-    COMPANY = str
+class DefaultExternalDataformatBaseType:
+    CONTAINED = 1  # like tar, zip
+    COMPRESSED = 2
+    ENCRYPTED = 3
+
+    IMAGE = 10
+    SOUND = 11
+    VIDEO = 12
+
+    OLE = 20
+    PDF = 21
+    MS_CONTAINER = 22
 
 
 supported_base_types_attributes = [attr for attr in DefaultBaseType.__dict__ if attr[0] != '_']

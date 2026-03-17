@@ -35,6 +35,19 @@ class StringConstraint(Enum):
     COUNTRY_SHORT = 24
     ADDRESS = 25
 
+    # TODO: check if we could not isolate these and complete this infinite list separately
+    PRINTABLE_STRING = 26
+    NUMERICAL_STRING = 27
+    ALPHABETICAL_STRING = 28
+    ALPHANUMERICAL_STRING = 29
+    SLUG_STRING = 30  # with _ and - allowed
+    HEXADECIMAL_STRING = 31
+    BASE64_ENCODED_STRING = 32
+    BASE32_ENCODED_STRING = 33
+    ASCII85_ENCODED_STRING = 34
+    WEBURL_SAFE_ENCODED_STRING = 35
+    XML_ENCODED_STRING = 36
+
 
 class BytesConstraint(Enum):
     OPAQUE = 1
