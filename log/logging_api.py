@@ -20,19 +20,28 @@ class LogLevel(Enum):
     ERROR = 40
     CRITICAL = 50
 
+GenericLogEvent = alias_for(DefaultGenericType.DICT[str, RootSerial], keyTypeHint=str, valueTypeHint=RootSerial)
+
 # event log intent is supposed to be emitted before the log component deals with policies that handles automatic
 # timing and space resolution of the event
 class EventLogIntent(BaseModel):
     message: DefaultBaseType.STRING | DefaultBaseType.NONE
     eventPriority: LogLevel
     eventData: RootSerial  # EventLog is a Generic and should be serializable data
+    additionalData: GenericLogEvent
+
+
+class ExecutionSystem(BaseModel):
+    nodeType: DefaultBaseType.TYPE
+    version: DefaultBaseType.SEMANTIC_VERSION
+
 
 class EventLocation(BaseModel):
     executionSystemLocation: ExecutionSystem  # on which currently execution system the log event has been emitted
     sourceCodeLocation: SourceCodeLocation    # where within the source code does the log originate from
     dynamicExecutionLocation: FiberLocation   # from which thread / fiber / process the log has been emitted (OS)
 
-class EventLog(EventLogIntent):
+class EventLog(EventLogIntent):  # for avoiding repeating the message, priority and data
     eventUtcDate: DefaultBaseType.DATETIME  # fixing datetime format to full UTC datetime
     eventLocation: EventLocation            # fixing location format
 
@@ -51,7 +60,10 @@ class LogApiType(Enum):
     # TODO: implement other useful logging API
 
 
-UndefinedLogEvent = alias_for(DefaultGenericType.DICT[str, RootSerial], keyTypeHint=str, valueTypeHint=RootSerial)
+class ResolveLocationPolicy(Enum):
+    resolveExecutionSystem: bool = False
+    resolveSourceCodeLocation: bool = True
+    resolveDynamicExecutionLocation: bool = True
 
 
 class LogRemainingArgumentsPolicy(Enum):
