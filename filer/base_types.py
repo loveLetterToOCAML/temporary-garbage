@@ -21,6 +21,24 @@ class PerUlid(BaseModel):
 
 
 
+from pydantic_extra_types.ulid import ULID
+from pydantic import BaseModel
+from typing import List
+
+
+class FileContent(BaseModel):
+    hash: bytes
+    ulid: ULID
+
+class FileMetadata(BaseModel):
+    pass
+
+class File(BaseModel):
+    location: List[str]
+    name: str
+
+
+
 class UploadContentIntent(BaseModel):
     kind: Literal[FilerBackendIntentType.UploadContent] = FilerBackendIntentType.UploadContent
     totalSize: int
