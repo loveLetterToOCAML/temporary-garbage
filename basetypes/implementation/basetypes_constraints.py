@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from enum import Enum
 
 
-class StringConstraint(Enum):
+class StringConstraintType(Enum):
     UUID = 1
     ULID = 2
 
@@ -49,7 +49,7 @@ class StringConstraint(Enum):
     XML_ENCODED_STRING = 36
 
 
-class BytesConstraint(Enum):
+class BytesConstraintType(Enum):
     OPAQUE = 1
     TYPE = 2
     CHILD_TYPE = 3
@@ -57,20 +57,20 @@ class BytesConstraint(Enum):
     X509_CERTIFICATE = 5
 
 
-class IntConstraint(Enum):
+class IntConstraintType(Enum):
     ATTRIBUTE = 1
 
 
 class StringWithConstraint(BaseModel):
-    constraint: StringConstraint
+    constraint: StringConstraintType
     data: str
 
 class BytesWithConstraint(BaseModel):
-    constraint: BytesConstraint
+    constraint: BytesConstraintType
     data: bytes
 
 class IntWithConstraint(BaseModel):
-    constraint: IntConstraint
+    constraint: IntConstraintType
     data: int
 
 
@@ -78,93 +78,93 @@ class IntWithConstraint(BaseModel):
 # Warning: some types are contextual, like the TYPE one which requires knowing all valid nodes of the type tree
 
 class Uuid(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.UUID
+    constraint: StringConstraintType = StringConstraintType.UUID
 
 class Ulid(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.ULID
+    constraint: StringConstraintType = StringConstraintType.ULID
 
 class Json(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.JSON_STRING
+    constraint: StringConstraintType = StringConstraintType.JSON_STRING
 
 class Yaml(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.YAML_STRING
+    constraint: StringConstraintType = StringConstraintType.YAML_STRING
 
 class Toml(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.TOML_STRING
+    constraint: StringConstraintType = StringConstraintType.TOML_STRING
 
 class SemVer(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.SEMANTIC_VERSION
+    constraint: StringConstraintType = StringConstraintType.SEMANTIC_VERSION
 
 class SecretRef(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.SECRET_REFERENCE
+    constraint: StringConstraintType = StringConstraintType.SECRET_REFERENCE
 
 class CronString(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.CRON_STRING
+    constraint: StringConstraintType = StringConstraintType.CRON_STRING
 
 class Color(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.COLOR
+    constraint: StringConstraintType = StringConstraintType.COLOR
 
 class Url(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.URL
+    constraint: StringConstraintType = StringConstraintType.URL
 
 class MacAddress(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.MAC_ADDRESS
+    constraint: StringConstraintType = StringConstraintType.MAC_ADDRESS
 
 class Ipv4Address(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.IPV4_ADDRESS
+    constraint: StringConstraintType = StringConstraintType.IPV4_ADDRESS
 
 class Ipv4Range(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.IPV4_RANGE
+    constraint: StringConstraintType = StringConstraintType.IPV4_RANGE
 
 class Ipv6Address(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.IPV6_ADDRESS
+    constraint: StringConstraintType = StringConstraintType.IPV6_ADDRESS
 
 class Ipv6Range(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.IPV6_RANGE
+    constraint: StringConstraintType = StringConstraintType.IPV6_RANGE
 
 class NetworkService(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.NETWORK_SERVICE
+    constraint: StringConstraintType = StringConstraintType.NETWORK_SERVICE
 
 class Domain(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.DOMAIN
+    constraint: StringConstraintType = StringConstraintType.DOMAIN
 
 class Fqdn(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.FQDN
+    constraint: StringConstraintType = StringConstraintType.FQDN
 
 class Email(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.EMAIL
+    constraint: StringConstraintType = StringConstraintType.EMAIL
 
 class PhoneNumber(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.PHONE_NUMBER
+    constraint: StringConstraintType = StringConstraintType.PHONE_NUMBER
 
 class SocialIdentity(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.SOCIAL_IDENTITY
+    constraint: StringConstraintType = StringConstraintType.SOCIAL_IDENTITY
 
 class SocialNumber(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.SOCIAL_NUMBER
+    constraint: StringConstraintType = StringConstraintType.SOCIAL_NUMBER
 
 class CountryName(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.COUNTRY_NAME
+    constraint: StringConstraintType = StringConstraintType.COUNTRY_NAME
 
 class CountryShort(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.COUNTRY_SHORT
+    constraint: StringConstraintType = StringConstraintType.COUNTRY_SHORT
 
 class Address(StringWithConstraint):
-    constraint: StringConstraint = StringConstraint.ADDRESS
+    constraint: StringConstraintType = StringConstraintType.ADDRESS
 
 
 class Opaque(BytesWithConstraint):
-    constraint: BytesConstraint = BytesConstraint.OPAQUE
+    constraint: BytesConstraintType = BytesConstraintType.OPAQUE
 
 class Type(BytesWithConstraint):
-    constraint: BytesConstraint = BytesConstraint.TYPE
+    constraint: BytesConstraintType = BytesConstraintType.TYPE
 
 class ChildType(BytesWithConstraint):
-    constraint: BytesConstraint = BytesConstraint.CHILD_TYPE
+    constraint: BytesConstraintType = BytesConstraintType.CHILD_TYPE
 
 class Certificate(BytesWithConstraint):
-    constraint: BytesConstraint = BytesConstraint.X509_CERTIFICATE
+    constraint: BytesConstraintType = BytesConstraintType.X509_CERTIFICATE
 
 
 class Attribute(IntWithConstraint):
-    constraint: IntConstraint = IntConstraint.ATTRIBUTE
+    constraint: IntConstraintType = IntConstraintType.ATTRIBUTE
