@@ -21,14 +21,13 @@ class PerUlid(BaseModel):
 
 
 
-from pydantic_extra_types.ulid import ULID
 from pydantic import BaseModel
 from typing import List
 
 
 class FileContent(BaseModel):
     hash: bytes
-    ulid: ULID
+    ulid: DefaultBaseType.ULID
 
 class FileMetadata(BaseModel):
     pass
@@ -49,11 +48,13 @@ class UploadReadyToStart(BaseModel):
     kind: Literal[FilerBackendIntentType.UploadReady] = FilerBackendIntentType.UploadReady
     uploadTicket: bytes
     chunkSize: int
+    expectedSize: int
+    expectedMaxDelay: DefaultBaseType.TIMEDELTA
 
 
 class UploadFinished(BaseModel):
     kind: Literal[FilerBackendIntentType.UploadFinished] = FilerBackendIntentType.UploadFinished
-    ulidUploaded: ULID
+    ulidUploaded: DefaultBaseType.ULID
     hashUploaded: bytes
     totalSizeUploaded: int
 
@@ -77,25 +78,14 @@ class UploadProgressResult(BaseModel):
     remainingTimeToUpload: float
 
 
-class GetContentPerHashIntent(PerHash):
-    pass
-
-class GetContentPerUlidIntent(PerUlid):
-    pass
 
 class GetContentIntent(BaseModel):
     kind: Literal[FilerBackendIntentType.GetContent] = FilerBackendIntentType.GetContent
-    intent: GetContentPerHashIntent | GetContentPerUlidIntent
-
-class GetContentSizePerHashIntent(PerHash):
-    pass
-
-class GetContentSizePerUlidIntent(PerUlid):
-    pass
+    intent: PerHash | PerUlid
 
 class GetContentSizeIntent(BaseModel):
     kind: Literal[FilerBackendIntentType.GetContentSize] = FilerBackendIntentType.GetContentSize
-    intent: GetContentSizePerHashIntent | GetContentSizePerUlidIntent
+    intent: PerHash | PerUlid
 
 class GetContentUlidForHashIntent(PerHash):
     kind: Literal[FilerBackendIntentType.GetContentUlidForHash] = FilerBackendIntentType.GetContentUlidForHash

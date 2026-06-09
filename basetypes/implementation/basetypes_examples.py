@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from basetypes.implementation.basetypes_match import DefaultBaseType
+
 from pydantic_core import PydanticUndefined
 from pydantic import BaseModel, IPvAnyAddress
 
@@ -24,11 +26,6 @@ from uuid import UUID
 from enum import Enum
 import ipaddress
 
-from basetypes.implementation.basetypes_match import DefaultBaseType
-
-
-t = DefaultBaseType.FLOAT(1.3)
-print(t)
 
 def example_for_type(tp: DefaultBaseType) -> Any:
     origin = get_origin(tp)

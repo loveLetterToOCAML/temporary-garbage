@@ -74,10 +74,12 @@ class ExternalSocialBaseType(Enum):
     COMPANY = 8
 
 
-class ExternalDataformatBaseType(Enum):
-    CONTAINED = 1   # like tar, zip
+class DataformatBaseType(Enum):
+    CONTAINED = 1  # like tar, zip
     COMPRESSED = 2
     ENCRYPTED = 3
+    HASHED = 4
+    SIGNED = 5
 
     IMAGE = 10
     SOUND = 11
@@ -151,11 +153,13 @@ class ExternalSocialBase(SerializationNode):
 ### END AUTO GENERATION
 
 ### BEGIN AUTO GENERATION
-# Auto-generated from ExternalDataformatBaseType for auto-completion purpose
-class ExternalDataformatBase(SerializationNode):
+# Auto-generated from DataformatBaseType for auto-completion purpose
+class DataformatBase(SerializationNode):
     CONTAINED = ...
     COMPRESSED = ...
     ENCRYPTED = ...
+    HASHED = ...
+    SIGNED = ...
     IMAGE = ...
     SOUND = ...
     VIDEO = ...
@@ -168,7 +172,7 @@ class ExternalDataformatBase(SerializationNode):
 Base: BaseData = Root.register_serialization_child(SerialType.BaseTypes, BaseDataType)
 ExternalNetworkBase: ExternalNetworkBase = Base.register_serialization_child(BaseDataType.OTHER_EXTERNAL_NETWORK, ExternalNetworkBaseType)
 ExternalSocialBase: ExternalSocialBase = Base.register_serialization_child(BaseDataType.OTHER_EXTERNAL_SOCIAL, ExternalSocialBaseType)
-ExternalDataFormatBase: ExternalDataformatBase = Base.register_serialization_child(BaseDataType.OTHER_EXTERNAL_DATAFORMAT, ExternalDataformatBaseType)
+ExternalDataFormatBase: DataformatBase = Base.register_serialization_child(BaseDataType.OTHER_EXTERNAL_DATAFORMAT, DataformatBaseType)
 
 
 # don't know if this is best way to proceed to inject dependency of type implementation (do we really need this
@@ -181,4 +185,4 @@ if __name__ == '__main__':
     print(generate_autocompletion_for_enum(BaseDataType))
     print(generate_autocompletion_for_enum(ExternalNetworkBaseType))
     print(generate_autocompletion_for_enum(ExternalSocialBaseType))
-    print(generate_autocompletion_for_enum(ExternalDataformatBaseType))
+    print(generate_autocompletion_for_enum(DataformatBaseType))

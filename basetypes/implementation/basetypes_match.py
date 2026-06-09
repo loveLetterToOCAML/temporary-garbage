@@ -104,10 +104,12 @@ class DefaultExternalSocialBaseType:
     COMPANY = str
 
 
-class DefaultExternalDataformatBaseType:
+class DefaultDataformatBaseType:
     CONTAINED = 1  # like tar, zip
     COMPRESSED = 2
     ENCRYPTED = 3
+    HASHED = 4
+    SIGNED = 5  # all the 5 above can be combined simultaneously
 
     IMAGE = 10
     SOUND = 11
