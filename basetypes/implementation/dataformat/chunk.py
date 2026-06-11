@@ -1,3 +1,5 @@
+from enum import Enum
+
 from basetypes.implementation.basetypes_match import DefaultBaseType
 
 from pydantic import BaseModel
@@ -16,20 +18,43 @@ class TimedGlobalChunksConstraint(GlobalChunksConstraint):
     bonusTimePer0x1000Chunks: DefaultBaseType.TIMEDELTA = datetime.timedelta(seconds=120)
     allowIfAnyMax: bool = True  # in the true case, even if maximum total size is set, it will continue even if elapsed while maximumChunkTime is respected
 
-class ChunkOrderingState(BaseModel):
-    missingChunks: int | List[int] | IntervalUnion[int]
-    uploadedChunks: int | List[int] | IntervalUnion[int]
-    remainingTime: DefaultBaseType.TIMEDELTA | None
+
+# Chunking = Content-addressed transfer  Content digest / commitment (manifest-first)
+# Or
+# Chunking = Streaming transfer  Trailing checksum / trailer digest
+
+# Chunking is a way to cut and send large amount of data in small pieces.
+
+# ContentTransfer is only compatible with knowing the exact data to transmit and its size, which can only happen in
+# non-streaming cases. Otherwise if we add some hash of produced data that must be sent prior to data, "replaying"
+# data is mandatory so all must be kept somewhere
+
+# StreamingTransfer is to use when prior size / content is unknown. ContentTransfer should be preferred in most cases
+
+
+class StreamingTransferState(BaseModel):
+    receivedChunks: IntervalUnion[int]
     currentChunkTimeMean: DefaultBaseType.TIMEDELTA
     maximumChunkTime: DefaultBaseType.TIMEDELTA
 
+class ContentTransferState(StreamingTransferState):
+    missingChunks: List[int] | IntervalUnion[int]
+    remainingTimeEstimation: DefaultBaseType.TIMEDELTA | None
 
-class ProposedChunkConstraint(BaseModel):
+
+class ChecksumType(Enum):
+    NONE = 1
+    CRC32 = 2
+    CRC64 = 3
+
+class StreamingTransferParameters(BaseModel):
     chunkSize: int = 0x100000
+    withChecksum: ChecksumType = ChecksumType.CRC32
+
+class ContentTransferParameters(StreamingTransferParameters):
     numberOfChunks: int
-    withHash: bool = True
 
 class DataChunk(BaseModel):
     index: int
     data: bytes
-    integrity: Hash | None
+    integrity: bytes | None

@@ -31,28 +31,10 @@ class KnownCompressionAlgorithm(BaseModel):
 
 
 class GzipCompressionParameters(BaseModel):
-    compressionLevel: int = Field(
-        default=6,
-        ge=0, le=9,
-        description='zlib compression level (0=none ... 9=max). Default to 6',
-    )
-    wbits: int = Field(
-        default=31,
-        description=(
-            'Window size bits for zlib.compressobj. gzip format=31, zlib format=15, raw deflate=-15'
-        ),
-    )
-    memLevel: int = Field(
-        default=8,
-        ge=1, le=9,
-        description='zlib internal memory usage (1=min ... 9=max). Default to 8',
-    )
-    strategy: int = Field(
-        default=0,
-        description=(
-            'zlib strategy: Z_DEFAULT_STRATEGY=0, Z_FILTERED=1, Z_HUFFMAN_ONLY=2, Z_RLE=3, Z_FIXED=4'
-        ),
-    )
+    compressionLevel: int = Field(default=6, ge=4, le=8)
+    # wbits: int  # default to -15 = raw deflate  # as there is a separate checksum per chunk supported elsewhere
+    # memLevel: int  # default to 8
+    # strategy: int  # default to 0 = Z_DEFAULT_STRATEGY
 
 class Gzip(KnownCompressionAlgorithm):
     type: Literal[CompressionAlgorithm.GZIP] = CompressionAlgorithm.GZIP
