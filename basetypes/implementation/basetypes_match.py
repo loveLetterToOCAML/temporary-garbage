@@ -105,7 +105,7 @@ class DefaultExternalSocialBaseType:
 
 
 class DefaultDataformatBaseType:
-    CONTAINED = 1  # like tar, zip
+    CONTAINED = 1  # like tar, zip, custom
     COMPRESSED = 2
     ENCRYPTED = 3
     HASHED = 4

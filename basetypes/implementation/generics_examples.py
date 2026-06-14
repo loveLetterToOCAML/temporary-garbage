@@ -1,7 +1,7 @@
+from basetypes.implementation.generics_match import DefaultGenericType
+
 from typing import get_origin, get_args, Annotated, Union, Literal, Any
 from types import UnionType
-
-from basetypes.implementation.generics_match import DefaultGenericType
 
 
 def example_for_type(tp: DefaultGenericType) -> Any:

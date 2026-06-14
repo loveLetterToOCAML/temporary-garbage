@@ -3,7 +3,7 @@ from enum import Enum
 from basetypes.implementation.basetypes_match import DefaultBaseType
 
 from pydantic import BaseModel
-from typing import List
+from typing import List, Generic, TypeVar
 import datetime
 
 
@@ -31,6 +31,11 @@ class TimedGlobalChunksConstraint(GlobalChunksConstraint):
 
 # StreamingTransfer is to use when prior size / content is unknown. ContentTransfer should be preferred in most cases
 
+
+T = TypeVar('T')
+
+class IntervalUnion(BaseModel, Generic[T]):
+    pass
 
 class StreamingTransferState(BaseModel):
     receivedChunks: IntervalUnion[int]

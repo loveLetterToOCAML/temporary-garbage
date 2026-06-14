@@ -3,7 +3,7 @@ Sliding-window flow control over UDP with anyio.
 
 Key properties
 --------------
-* Window of N "in-flight" slots — a packet only leaves in-flight when its ACK
+* Window of N "in-flight" slots â€” a packet only leaves in-flight when its ACK
   arrives (or it is declared lost after max retries).
 * Each slot has an independent retransmit timer; expiry triggers resend, not
   window release.  The slot is released only on ACK or final give-up.
@@ -16,9 +16,9 @@ Key properties
 
 Topology
 --------
-  Producer  →  SlidingWindowSender  ──UDP──►  UDPReceiver
-                      ▲                            │
-                      └──────────── ACKs ──────────┘
+  Producer  â†’  SlidingWindowSender  â”€â”€UDPâ”€â”€â–º  UDPReceiver
+                      â–²                            â”‚
+                      â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ACKs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 Run demo
 --------
@@ -58,9 +58,9 @@ logging.basicConfig(
 #  ACK  packet:   [ 0x02 | seq: u32 ]
 #
 TYPE_DATA = 0x01
-TYPE_ACK  = 0x02
-HEADER_DATA = struct.Struct("!BL")      # type + seq  (5 bytes)
-HEADER_ACK  = struct.Struct("!BL")      # same layout
+TYPE_ACK = 0x02
+HEADER_DATA = struct.Struct("!BL")  # type + seq  (5 bytes)
+HEADER_ACK = struct.Struct("!BL")  # same layout
 
 
 def encode_data(seq: int, payload: bytes) -> bytes:
@@ -78,13 +78,13 @@ def decode(raw: bytes) -> tuple[int, int, bytes]:
     return pkt_type, seq, payload
 
 
-
 class RTTEstimatorParameters(BaseModel):
     ALPHA: float = 0.125
     BETA: float = 0.125
     K: float = 4
     MIN_RTO: float = 0.1
     MAX_RTO: float = 20.0
+
 
 rtt_estimator_parameters = ContextVar[RTTEstimatorParameters]('rtt_estimator', default=RTTEstimatorParameters())
 
@@ -95,21 +95,22 @@ rtt_estimator_parameters = ContextVar[RTTEstimatorParameters]('rtt_estimator', d
 # ---------------------------------------------------------------------------
 
 class RTTEstimator:
-    # srtt = sample rtt
+    # srtt = estimated rtt
     # rttvar = variance of srtt
     # rto = next computed timeout
 
     def __init__(self, initial_rtt: float = 0.2):
         self.parameters = rtt_estimator_parameters.get()
-        self.srtt    = initial_rtt
-        self.rttvar  = initial_rtt / 2
-        self.rto     = initial_rtt * 2
+        self.srtt = initial_rtt
+        self.rttvar = initial_rtt / 2
+        self.rto = initial_rtt * 2
 
     def update(self, sample: float) -> None:
         diff = self.srtt - sample
         self.rttvar = (1 - self.parameters.BETA) * self.rttvar + self.parameters.BETA * abs(diff)
-        self.srtt   = (1 - self.parameters.ALPHA) * self.srtt   + self.parameters.ALPHA * sample
-        self.rto    = max(self.parameters.MIN_RTO, min(self.parameters.MAX_RTO, self.srtt + self.parameters.K * self.rttvar))
+        self.srtt = (1 - self.parameters.ALPHA) * self.srtt + self.parameters.ALPHA * sample
+        self.rto = max(self.parameters.MIN_RTO,
+                       min(self.parameters.MAX_RTO, self.srtt + self.parameters.K * self.rttvar))
 
     @property
     def timeout(self) -> float:
@@ -118,8 +119,8 @@ class RTTEstimator:
 
 class SlotState(Enum):
     IN_FLIGHT = 1
-    ACKED     = 2
-    LOST      = 3
+    ACKED = 2
+    LOST = 3
 
 
 class Slot(BaseModel):
@@ -134,31 +135,20 @@ class Slot(BaseModel):
 class SlidingWindowSender:
 
     def __init__(
-        self,
-        socket: anyio.abc.UDPSocket,
-        peer_addr: tuple[str, int],
-        window_size: int = 8,
-        max_attempts: int = 5,
-        sim_loss: float = 0.0,
+            self,
     ) -> None:
-        self._sock        = socket
-        self._peer        = peer_addr
-        self._window      = anyio.Semaphore(window_size)
-        self._max_attempts = max_attempts
-        self._sim_loss    = sim_loss
-        self._rtt         = RTTEstimator()
-        self._seq         = 0
-        # seq → Slot  (only in-flight slots live here)
+        self._window = anyio.Semaphore(window_size)
+        self._rtt = RTTEstimator()
+        self._seq = 0
         self._in_flight: dict[int, Slot] = {}
-        self._lock        = anyio.Lock()
-
+        self._lock = anyio.Lock()
 
     async def send(self, payload: bytes) -> None:
-        await self._window.acquire()        # block until a slot is free
+        await self._window.acquire()
         async with self._lock:
             seq = self._seq
             self._seq += 1
-            slot = Slot(seq=seq, payload=payload, sent_at=time.monotonic())
+            slot = Slot(seq=seq, payload=payload, sentAt=time.monotonic())
             self._in_flight[seq] = slot
         await self._transmit(seq, payload)
 
@@ -167,7 +157,7 @@ class SlidingWindowSender:
         async with self._lock:
             seq = self._seq
             self._seq += 1
-            slot = Slot(seq=seq, payload=payload, sent_at=time.monotonic())
+            slot = Slot(seq=seq, payload=payload, sentAt=time.monotonic())
             self._in_flight[seq] = slot
 
         await self._transmit(seq, payload)
@@ -178,7 +168,7 @@ class SlidingWindowSender:
             slot = self._in_flight.pop(seq, None)
 
         if slot is None:
-            logger.debug("ACK %d — duplicate or unknown, ignoring", seq)
+            logger.debug("ACK %d â€” duplicate or unknown, ignoring", seq)
             return
 
         if slot.attempts == 1:
@@ -203,7 +193,6 @@ class SlidingWindowSender:
                 for slot in slots:
                     tg.start_soon(slot.done_event.wait)
 
-
     async def _transmit(self, seq: int, payload: bytes) -> None:
         """Raw UDP send, with optional simulated loss."""
         if self._sim_loss > 0 and random.random() < self._sim_loss:
@@ -219,7 +208,7 @@ class SlidingWindowSender:
                     slot = self._in_flight.get(seq)
                 if slot:
                     await slot.done_event.wait()
-                return  # ACK arrived in time — done
+                return  # ACK arrived in time â€” done
 
             async with self._lock:
                 slot = self._in_flight.get(seq)
@@ -257,23 +246,23 @@ class SlidingWindowReceiver:
     Parameters
     ----------
     socket        anyio UDP socket (already bound)
-    handler       async callable (seq, payload) → None
+    handler       async callable (seq, payload) â†’ None
     dedup_window  how many recent seq numbers to remember for dedup
     """
 
     def __init__(
-        self,
-        socket: anyio.abc.UDPSocket,
-        handler,
-        dedup_window: int = 1024,
+            self,
+            socket: anyio.abc.UDPSocket,
+            handler,
+            dedup_window: int = 1024,
     ) -> None:
-        self._sock         = socket
-        self._handler      = handler
+        self._sock = socket
+        self._handler = handler
         self._dedup_window = dedup_window
         self._seen: OrderedDict[int, bool] = OrderedDict()
 
     async def run(self) -> None:
-        """Receive loop — runs until cancelled."""
+        """Receive loop â€” runs until cancelled."""
         async with self._sock:
             async for raw, (host, port) in self._sock:
                 try:
@@ -285,7 +274,7 @@ class SlidingWindowReceiver:
                 if pkt_type != TYPE_DATA:
                     continue
 
-                # Always ACK — even duplicates (ACK could have been lost)
+                # Always ACK â€” even duplicates (ACK could have been lost)
                 ack = encode_ack(seq)
                 await self._sock.sendto(ack, host, port)
 
@@ -306,24 +295,24 @@ class SlidingWindowReceiver:
 # Demo
 # ---------------------------------------------------------------------------
 
-SENDER_PORT   = 15000
+SENDER_PORT = 15000
 RECEIVER_PORT = 15001
-HOST          = "127.0.0.1"
-NUM_PACKETS   = 60
-WINDOW_SIZE   = 8
-SIM_LOSS      = 0.20    # 20% artificial packet loss to exercise retransmits
+HOST = "127.0.0.1"
+NUM_PACKETS = 60
+WINDOW_SIZE = 8
+SIM_LOSS = 0.20  # 20% artificial packet loss to exercise retransmits
 
 
 async def demo_receiver_handler(seq: int, payload: bytes) -> None:
     text = payload.decode(errors="replace")
-    logger.info("  📦 delivered  seq=%-4d  payload=%r", seq, text[:40])
-    # Simulate a slow receiver — won't overflow it
+    logger.info("  ðŸ“¦ delivered  seq=%-4d  payload=%r", seq, text[:40])
+    # Simulate a slow receiver â€” won't overflow it
     await anyio.sleep(0.02)
 
 
 async def run_receiver() -> None:
     async with await anyio.create_udp_socket(
-        local_host=HOST, local_port=RECEIVER_PORT
+            local_host=HOST, local_port=RECEIVER_PORT
     ) as sock:
         receiver = SlidingWindowReceiver(sock, demo_receiver_handler)
         await receiver.run()
@@ -334,11 +323,11 @@ async def run_sender() -> None:
     await anyio.sleep(0.1)
 
     async with await anyio.create_udp_socket(
-        local_host=HOST, local_port=SENDER_PORT
+            local_host=HOST, local_port=SENDER_PORT
     ) as data_sock:
         # Separate socket for ACK reception on sender side
         async with await anyio.create_udp_socket(
-            local_host=HOST, local_port=SENDER_PORT + 100
+                local_host=HOST, local_port=SENDER_PORT + 100
         ) as ack_sock:
 
             sender = SlidingWindowSender(
@@ -377,10 +366,10 @@ async def run_sender() -> None:
                     if s.state == SlotState.LOST
                 )
                 logger.info(
-                    "Done — %d packets in %.2fs  (window=%d  sim_loss=%.0f%%  given_up=%d)",
+                    "Done â€” %d packets in %.2fs  (window=%d  sim_loss=%.0f%%  given_up=%d)",
                     NUM_PACKETS, elapsed, WINDOW_SIZE, SIM_LOSS * 100, lost,
                 )
-                tg.cancel_scope.cancel()    # stop ack_loop
+                tg.cancel_scope.cancel()  # stop ack_loop
 
 
 async def main() -> None:

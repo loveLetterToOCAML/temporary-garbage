@@ -4,9 +4,9 @@ Sliding-window flow control over UDP with anyio.
 Key properties
 --------------
 * Dynamic effective window = min(CWND, RWND):
-    - CWND  (congestion window) — sender-side, grows via slow-start /
+    - CWND  (congestion window) â€” sender-side, grows via slow-start /
       congestion-avoidance, shrinks on loss.
-    - RWND  (receiver window)  — advertised by the receiver in every ACK,
+    - RWND  (receiver window)  â€” advertised by the receiver in every ACK,
       reflecting its remaining processing capacity.
 * Each in-flight slot has an independent retransmit watchdog; the slot is
   released only on ACK receipt or after max_attempts (Karn's rule: RTT
@@ -19,13 +19,13 @@ Key properties
 Wire format
 -----------
   DATA packet:  [ 0x01 | seq: u32 | payload ]
-  ACK  packet:  [ 0x02 | seq: u32 | rwnd: u16 ]   ← rwnd added
+  ACK  packet:  [ 0x02 | seq: u32 | rwnd: u16 ]   â† rwnd added
 
 Topology
 --------
-  Producer  →  SlidingWindowSender  ──UDP──►  SlidingWindowReceiver
-                      ▲                            │
-                      └──────────── ACKs ──────────┘
+  Producer  â†’  SlidingWindowSender  â”€â”€UDPâ”€â”€â–º  SlidingWindowReceiver
+                      â–²                            â”‚
+                      â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ACKs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
                                  (seq + rwnd)
 
 Run demo
@@ -58,13 +58,13 @@ logging.basicConfig(
 # Wire format
 # ---------------------------------------------------------------------------
 #
-#  DATA:  [ type:u8=0x01 | seq:u32 | payload… ]
+#  DATA:  [ type:u8=0x01 | seq:u32 | payloadâ€¦ ]
 #  ACK:   [ type:u8=0x02 | seq:u32 | rwnd:u16 ]
 #
-TYPE_DATA   = 0x01
-TYPE_ACK    = 0x02
-HEADER_DATA = struct.Struct("!BL")       # 5 bytes
-HEADER_ACK  = struct.Struct("!BLH")     # 7 bytes  (added rwnd field)
+TYPE_DATA = 0x01
+TYPE_ACK = 0x02
+HEADER_DATA = struct.Struct("!BL")  # 5 bytes
+HEADER_ACK = struct.Struct("!BLH")  # 7 bytes  (added rwnd field)
 
 
 def encode_data(seq: int, payload: bytes) -> bytes:
@@ -92,38 +92,38 @@ def decode(raw: bytes) -> tuple[int, int, bytes, int]:
 
 
 # ---------------------------------------------------------------------------
-# RTT estimator — RFC 6298 compliant
+# RTT estimator â€” RFC 6298 compliant
 # ---------------------------------------------------------------------------
 
 class RTTEstimator:
     """
     Jacobson/Karels EWMA estimator, following RFC 6298 exactly:
-      - Before first sample: RTO = 1 s (§2.1)
-      - First sample R:  SRTT = R,  RTTVAR = R/2,  RTO = SRTT + 4*RTTVAR  (§2.2)
-      - Subsequent:      RTTVAR updated with *old* SRTT, then SRTT updated  (§2.3)
+      - Before first sample: RTO = 1 s (Â§2.1)
+      - First sample R:  SRTT = R,  RTTVAR = R/2,  RTO = SRTT + 4*RTTVAR  (Â§2.2)
+      - Subsequent:      RTTVAR updated with *old* SRTT, then SRTT updated  (Â§2.3)
     Karn's rule: callers must NOT pass samples from retransmitted packets.
     """
 
-    ALPHA   = 0.125     # SRTT smoothing  (1/8)
-    BETA    = 0.25      # RTTVAR smoothing (1/4)
-    K       = 4         # RTO = SRTT + K * RTTVAR
-    MIN_RTO = 0.2       # seconds
-    MAX_RTO = 60.0      # RFC 6298 §2.5
+    ALPHA = 0.125  # SRTT smoothing  (1/8)
+    BETA = 0.25  # RTTVAR smoothing (1/4)
+    K = 4  # RTO = SRTT + K * RTTVAR
+    MIN_RTO = 0.2  # seconds
+    MAX_RTO = 60.0  # RFC 6298 Â§2.5
 
     def __init__(self) -> None:
-        self.srtt:   float | None = None    # no estimate before first sample
+        self.srtt: float | None = None  # no estimate before first sample
         self.rttvar: float | None = None
-        self.rto:    float        = 1.0     # RFC 6298 §2.1
+        self.rto: float = 1.0  # RFC 6298 Â§2.1
 
     def update(self, sample: float) -> None:
         if self.srtt is None:
-            # §2.2 — first measurement bootstrap
-            self.srtt   = sample
+            # Â§2.2 â€” first measurement bootstrap
+            self.srtt = sample
             self.rttvar = sample / 2.0
         else:
-            # §2.3 — RTTVAR uses *old* SRTT; update order matters
-            self.rttvar = (1 - self.BETA)  * self.rttvar + self.BETA  * abs(self.srtt - sample)
-            self.srtt   = (1 - self.ALPHA) * self.srtt   + self.ALPHA * sample
+            # Â§2.3 â€” RTTVAR uses *old* SRTT; update order matters
+            self.rttvar = (1 - self.BETA) * self.rttvar + self.BETA * abs(self.srtt - sample)
+            self.srtt = (1 - self.ALPHA) * self.srtt + self.ALPHA * sample
 
         self.rto = max(self.MIN_RTO,
                        min(self.MAX_RTO, self.srtt + self.K * self.rttvar))
@@ -139,7 +139,7 @@ class RTTEstimator:
 
 class CongestionWindow:
     """
-    Sender-side congestion control: slow start → congestion avoidance.
+    Sender-side congestion control: slow start â†’ congestion avoidance.
 
     Slow start:          cwnd += 1 per ACK  (doubles each RTT)
     Congestion avoidance: cwnd += 1/cwnd per ACK  (+1 per RTT)
@@ -150,9 +150,9 @@ class CongestionWindow:
     """
 
     def __init__(self, initial_window: int = 1, max_window: int = 64) -> None:
-        self.cwnd:     float = float(initial_window)
+        self.cwnd: float = float(initial_window)
         self.ssthresh: float = float(max_window)
-        self._max:     float = float(max_window)
+        self._max: float = float(max_window)
 
     # Called for every clean ACK (not a retransmit ACK)
     def on_ack(self) -> None:
@@ -168,13 +168,13 @@ class CongestionWindow:
     # Called on RTO timeout (hard loss)
     def on_timeout_loss(self) -> None:
         self.ssthresh = max(self.cwnd / 2.0, 2.0)
-        self.cwnd     = 1.0
+        self.cwnd = 1.0
         logger.debug("CWND timeout-loss  cwnd=%.1f  ssthresh=%.1f", self.cwnd, self.ssthresh)
 
     # Called on triple duplicate ACK (fast retransmit)
     def on_triple_dup_ack(self) -> None:
         self.ssthresh = max(self.cwnd / 2.0, 2.0)
-        self.cwnd     = self.ssthresh
+        self.cwnd = self.ssthresh
         logger.debug("CWND triple-dup-ack  cwnd=%.1f  ssthresh=%.1f", self.cwnd, self.ssthresh)
 
     @property
@@ -188,17 +188,17 @@ class CongestionWindow:
 
 class SlotState(Enum):
     IN_FLIGHT = auto()
-    ACKED     = auto()
-    LOST      = auto()
+    ACKED = auto()
+    LOST = auto()
 
 
 @dataclass
 class Slot:
-    seq:        int
-    payload:    bytes
-    sent_at:    float
-    state:      SlotState  = SlotState.IN_FLIGHT
-    attempts:   int        = 1
+    seq: int
+    payload: bytes
+    sent_at: float
+    state: SlotState = SlotState.IN_FLIGHT
+    attempts: int = 1
     done_event: anyio.Event = field(default_factory=anyio.Event)
 
 
@@ -218,11 +218,11 @@ class WindowGate:
     """
 
     def __init__(self) -> None:
-        self._in_flight:  int        = 0
-        self._cwnd:       int        = 1       # start at 1 (slow start)
-        self._rwnd:       int        = 1       # conservative until first ACK
-        self._lock:       anyio.Lock = anyio.Lock()
-        self._has_space:  anyio.Event = anyio.Event()
+        self._in_flight: int = 0
+        self._cwnd: int = 1  # start at 1 (slow start)
+        self._rwnd: int = 1  # conservative until first ACK
+        self._lock: anyio.Lock = anyio.Lock()
+        self._has_space: anyio.Event = anyio.Event()
         # Set initially so the very first acquire() doesn't block
         self._has_space.set()
 
@@ -237,7 +237,7 @@ class WindowGate:
                 if self._in_flight < self._effective:
                     self._in_flight += 1
                     return
-                # Window full — arm a fresh event to wait on
+                # Window full â€” arm a fresh event to wait on
                 evt = anyio.Event()
                 self._has_space = evt
 
@@ -260,7 +260,7 @@ class WindowGate:
     async def update_rwnd(self, rwnd: int) -> None:
         async with self._lock:
             self._rwnd = max(1, rwnd)
-            self._has_space.set()   # window may have opened
+            self._has_space.set()  # window may have opened
 
     # ------------------------------------------------------------------
     # Called by CongestionWindow mutations
@@ -280,8 +280,8 @@ class WindowGate:
     def stats(self) -> dict:
         return {
             "in_flight": self._in_flight,
-            "cwnd":      self._cwnd,
-            "rwnd":      self._rwnd,
+            "cwnd": self._cwnd,
+            "rwnd": self._rwnd,
             "effective": min(self._cwnd, self._rwnd),
         }
 
@@ -295,8 +295,8 @@ class SlidingWindowSender:
     Sends payloads over UDP with a dynamic sliding window.
 
     Effective window = min(CWND, RWND):
-      CWND — grows via slow-start / congestion-avoidance, shrinks on loss.
-      RWND — updated from the rwnd field carried in every ACK datagram.
+      CWND â€” grows via slow-start / congestion-avoidance, shrinks on loss.
+      RWND â€” updated from the rwnd field carried in every ACK datagram.
 
     The sender owns its watchdog nursery internally.  Use as an async
     context manager so the nursery is alive for the full session:
@@ -307,29 +307,29 @@ class SlidingWindowSender:
     """
 
     def __init__(
-        self,
-        socket:       anyio.abc.UDPSocket,
-        peer_addr:    tuple[str, int],
-        max_cwnd:     int   = 64,
-        max_attempts: int   = 5,
-        sim_loss:     float = 0.0,
+            self,
+            socket: anyio.abc.UDPSocket,
+            peer_addr: tuple[str, int],
+            max_cwnd: int = 64,
+            max_attempts: int = 5,
+            sim_loss: float = 0.0,
     ) -> None:
-        self._sock         = socket
-        self._peer         = peer_addr
+        self._sock = socket
+        self._peer = peer_addr
         self._max_attempts = max_attempts
-        self._sim_loss     = sim_loss
+        self._sim_loss = sim_loss
 
-        self._rtt   = RTTEstimator()
-        self._cwnd  = CongestionWindow(initial_window=1, max_window=max_cwnd)
-        self._gate  = WindowGate()
+        self._rtt = RTTEstimator()
+        self._cwnd = CongestionWindow(initial_window=1, max_window=max_cwnd)
+        self._gate = WindowGate()
 
-        self._seq   = 0
+        self._seq = 0
         self._in_flight: dict[int, Slot] = {}
-        self._lock  = anyio.Lock()
+        self._lock = anyio.Lock()
         self._nursery: anyio.abc.TaskGroup | None = None
 
     # ------------------------------------------------------------------
-    # Async context manager — owns the watchdog nursery
+    # Async context manager â€” owns the watchdog nursery
     # ------------------------------------------------------------------
     #
     # @asynccontextmanager works best as a factory function, not inside a
@@ -340,7 +340,7 @@ class SlidingWindowSender:
     # The clean class-based idiom is: delegate __aenter__/__aexit__ to a
     # single @asynccontextmanager *method* that yields self.  Python's
     # asynccontextmanager returns an AsyncContextManager object whose
-    # __aenter__/__aexit__ drive the generator — we just forward to it.
+    # __aenter__/__aexit__ drive the generator â€” we just forward to it.
 
     async def __aenter__(self) -> "SlidingWindowSender":
         self._cm = self._lifespan()
@@ -357,7 +357,7 @@ class SlidingWindowSender:
             self._nursery = tg
             yield self
             await self.drain()
-            tg.cancel_scope.cancel()   # stop watchdogs that are still waiting
+            tg.cancel_scope.cancel()  # stop watchdogs that are still waiting
 
     # ------------------------------------------------------------------
     # Public API
@@ -370,7 +370,7 @@ class SlidingWindowSender:
         await self._gate.acquire()
 
         async with self._lock:
-            seq  = self._seq
+            seq = self._seq
             self._seq += 1
             slot = Slot(seq=seq, payload=payload, sent_at=time.monotonic())
             self._in_flight[seq] = slot
@@ -390,7 +390,7 @@ class SlidingWindowSender:
             slot = self._in_flight.pop(seq, None)
 
         if slot is None:
-            logger.debug("ACK %d — duplicate or unknown", seq)
+            logger.debug("ACK %d â€” duplicate or unknown", seq)
             return
 
         # Karn's rule: only sample RTT for packets that were not retransmitted
@@ -447,7 +447,7 @@ class SlidingWindowSender:
                     slot = self._in_flight.get(seq)
                 if slot:
                     await slot.done_event.wait()
-                return  # ACK arrived — done
+                return  # ACK arrived â€” done
 
             # RTO fired
             async with self._lock:
@@ -468,7 +468,7 @@ class SlidingWindowSender:
                 return
 
             slot.attempts += 1
-            # Do NOT update sent_at — Karn: we won't sample RTT for this retransmit
+            # Do NOT update sent_at â€” Karn: we won't sample RTT for this retransmit
             logger.debug("RETRANSMIT  seq=%d  attempt=%d  rto=%.3fs", seq, slot.attempts, rto)
             self._cwnd.on_timeout_loss()
             await self._gate.update_cwnd(self._cwnd.value)
@@ -489,32 +489,32 @@ class SlidingWindowReceiver:
     Parameters
     ----------
     socket        anyio UDP socket (already bound)
-    handler       async callable (seq, payload) → None
+    handler       async callable (seq, payload) â†’ None
     max_queue     processing queue capacity (drives RWND advertisement)
     dedup_window  how many recent seq numbers to remember for dedup
     """
 
     def __init__(
-        self,
-        socket:       anyio.abc.UDPSocket,
-        handler,
-        max_queue:    int = 16,
-        dedup_window: int = 1024,
+            self,
+            socket: anyio.abc.UDPSocket,
+            handler,
+            max_queue: int = 16,
+            dedup_window: int = 1024,
     ) -> None:
-        self._sock        = socket
-        self._handler     = handler
-        self._max_queue   = max_queue
+        self._sock = socket
+        self._handler = handler
+        self._max_queue = max_queue
         self._dedup_window = dedup_window
-        self._seen:    OrderedDict[int, bool] = OrderedDict()
+        self._seen: OrderedDict[int, bool] = OrderedDict()
         # Semaphore limits concurrent handler calls = processing queue depth
         self._proc_sem = anyio.Semaphore(max_queue)
 
     def _rwnd(self) -> int:
         """Remaining processing slots = what we're willing to receive."""
-        return self._proc_sem._value   # slots not yet acquired
+        return self._proc_sem._value  # slots not yet acquired
 
     async def run(self) -> None:
-        """Receive loop — runs until cancelled."""
+        """Receive loop â€” runs until cancelled."""
         async with anyio.create_task_group() as tg:
             async with self._sock:
                 async for raw, (host, port) in self._sock:
@@ -556,26 +556,26 @@ class SlidingWindowReceiver:
 # Demo
 # ---------------------------------------------------------------------------
 
-SENDER_PORT   = 15000
+SENDER_PORT = 15000
 RECEIVER_PORT = 15001
-ACK_PORT      = 15002
-HOST          = "127.0.0.1"
-NUM_PACKETS   = 60
-MAX_CWND      = 16
-RECEIVER_QUEUE = 6      # small queue → RWND pressure visible in logs
-SIM_LOSS      = 0.15
+ACK_PORT = 15002
+HOST = "127.0.0.1"
+NUM_PACKETS = 60
+MAX_CWND = 16
+RECEIVER_QUEUE = 6  # small queue â†’ RWND pressure visible in logs
+SIM_LOSS = 0.15
 
 
 async def demo_receiver_handler(seq: int, payload: bytes) -> None:
     text = payload.decode(errors="replace")
-    logger.info("  📦 delivered  seq=%-4d  %r", seq, text[:40])
-    # Simulate slow processing — backs up the queue, shrinks RWND
+    logger.info("  ðŸ“¦ delivered  seq=%-4d  %r", seq, text[:40])
+    # Simulate slow processing â€” backs up the queue, shrinks RWND
     await anyio.sleep(random.uniform(0.02, 0.08))
 
 
 async def run_receiver() -> None:
     async with await anyio.create_udp_socket(
-        local_host=HOST, local_port=RECEIVER_PORT
+            local_host=HOST, local_port=RECEIVER_PORT
     ) as sock:
         receiver = SlidingWindowReceiver(
             sock,
@@ -586,21 +586,21 @@ async def run_receiver() -> None:
 
 
 async def run_sender() -> None:
-    await anyio.sleep(0.1)   # let receiver bind first
+    await anyio.sleep(0.1)  # let receiver bind first
 
     async with await anyio.create_udp_socket(
-        local_host=HOST, local_port=SENDER_PORT
+            local_host=HOST, local_port=SENDER_PORT
     ) as data_sock:
         async with await anyio.create_udp_socket(
-            local_host=HOST, local_port=ACK_PORT
+                local_host=HOST, local_port=ACK_PORT
         ) as ack_sock:
 
             async with SlidingWindowSender(
-                data_sock,
-                peer_addr=(HOST, RECEIVER_PORT),
-                max_cwnd=MAX_CWND,
-                max_attempts=5,
-                sim_loss=SIM_LOSS,
+                    data_sock,
+                    peer_addr=(HOST, RECEIVER_PORT),
+                    max_cwnd=MAX_CWND,
+                    max_attempts=5,
+                    sim_loss=SIM_LOSS,
             ) as sender:
 
                 async def ack_loop() -> None:
@@ -624,7 +624,7 @@ async def run_sender() -> None:
                     elapsed = time.monotonic() - t0
 
                     logger.info(
-                        "Done — %d packets in %.2fs  (max_cwnd=%d  rx_queue=%d  sim_loss=%.0f%%)",
+                        "Done â€” %d packets in %.2fs  (max_cwnd=%d  rx_queue=%d  sim_loss=%.0f%%)",
                         NUM_PACKETS, elapsed, MAX_CWND, RECEIVER_QUEUE, SIM_LOSS * 100,
                     )
                     tg.cancel_scope.cancel()

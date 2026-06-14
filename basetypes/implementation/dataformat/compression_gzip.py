@@ -10,15 +10,12 @@ Algorithms:
 from __future__ import annotations
 
 import gzip
-import lz4.frame
-import lz4.block
-import zstandard as zstd
 import time
 import zlib
-from enum import IntEnum
-from typing import Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
+from basetypes.implementation.dataformat.compression import CompressionResult
+from basetypes.implementation.dataformat.compression_protocols import StreamCompressorProtocol
 
 
 class InternalGzipCompressionParameters(BaseModel):
@@ -47,24 +44,24 @@ class InternalGzipCompressionParameters(BaseModel):
 
 
 
-class GzipCompressor(BaseModel):
+class GzipCompressor(StreamCompressorProtocol):
     """Gzip compressor — balanced speed / ratio using Python stdlib."""
-    params: GzipParams = Field(default_factory=GzipParams)
 
-    model_config = {"arbitrary_types_allowed": True}
+    def __init__(self, params):
+        self.params = params
 
-    def compress(self, data: bytes) -> tuple[bytes, float]:
+    def compress(self, data: bytes) -> bytes:
         obj = zlib.compressobj(
-            self.params.compresslevel,
+            self.params.compressionLevel,
             zlib.DEFLATED,
-            self.params.wbits,
-            self.params.memLevel,
-            self.params.strategy,
+            -15,
+            8,
+            0,
         )
         t0 = time.perf_counter()
         compressed = obj.compress(data) + obj.flush()
         elapsed = (time.perf_counter() - t0) * 1000
-        return compressed, elapsed
+        return compressed
 
     def decompress(self, data: bytes) -> tuple[bytes, float]:
         t0 = time.perf_counter()
