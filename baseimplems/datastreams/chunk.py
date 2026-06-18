@@ -24,7 +24,7 @@ content_transfer_parameters = ContextVar[ContentTransferParameters]('transfer_pa
 class ChunkInMemoryConstraint(BaseModel):
     chunkSize: int = 0x10000
     numberOfChunks: int = 0x100
-    timeBeforeFlush: float = 0.01
+    timeBeforeFlush: float = 0.1
 
 
 class ChunkedBytes(AsyncContextManagerMixin):
@@ -62,10 +62,8 @@ class ChunkedBytes(AsyncContextManagerMixin):
                     with move_on_after(self._memory_constraints.timeBeforeFlush) as data_or_flush:
                         try:
                             raw = await it.__anext__()
-                        except EndOfStream:
-                            if buf:
-                                await send_current(buf)
-                            return
+                        except StopAsyncIteration:
+                            break
 
                     if raw:
                         buf += raw
@@ -79,9 +77,13 @@ class ChunkedBytes(AsyncContextManagerMixin):
                         await send_current(buf)
                         buf = bytearray()
 
+                if buf:
+                    await send_current(buf)
+            print("LEAVING SEND")
+
 
         async def consumer():
-            async with _internal_consumer:
+            async with _internal_consumer, _internal_producer:
                 async for chunk in _internal_consumer:
                     sem.release()
                     await _internal_producer.send(chunk)
@@ -187,7 +189,7 @@ class ObservableChunkedFileClient():
         try:
             await self._sink.send(event)
         except anyio.ClosedResourceError:
-            pass  # listener already gone â€” don't crash the upload
+            pass
 
     async def _upload_chunk(
             self,

@@ -158,10 +158,6 @@ def compression_obj_for(instance: CompressionAlgorithmInstance) -> CommonDataBuf
             raise NotImplementedError
 
 
-def decompression_obj_for() -> CommonDataBufferSyncProcessing:
-    pass
-
-
 @asynccontextmanager
 async def async_decompress(instance: CompressionAlgorithmInstance):
     decompressor = compression_obj_for(instance)

@@ -1,6 +1,6 @@
 from basetypes.implementation.dataformat.compression import compression_obj_for, CompressionAlgorithmInstance, \
-    CommonDataBufferSyncProcessing, decompression_obj_for
-from baseimplems.dataformat.chunk import ChunkInMemoryConstraint, ChunkedBytes
+    CommonDataBufferSyncProcessing
+from baseimplems.datastreams.chunk import ChunkInMemoryConstraint, ChunkedBytes
 
 from pydantic import BaseModel
 
@@ -16,8 +16,8 @@ class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
     def __init__(self, upper_stream: ObjectReceiveStream[bytes], sync_process_factory: Callable[[BaseModel], CommonDataBufferSyncProcessing],
                  parameters_for_sync_obj: BaseModel, *, memory_constraints: ChunkInMemoryConstraint | None = None,
                  reset_stream: ObjectReceiveStream | None = None):
-        self._upper_stream = upper_stream
         self._memory_constraints = memory_constraints or ChunkInMemoryConstraint()
+        self._upper_stream = upper_stream
         self._reset_stream = reset_stream
         self._sync_process_factory = sync_process_factory
         self._parameters_for_sync_obj = parameters_for_sync_obj
@@ -36,17 +36,18 @@ class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
 
             async def reset_and_send():
                 compressor: CommonDataBufferSyncProcessing = self._sync_process_factory(self._parameters_for_sync_obj)
-                header = await to_thread.run_sync(compressor.begin, limiter=limiter)
+                header = await to_thread.run_sync(compressor.begin, limiter=limiter) or b''
                 await compressed_data_send.send(header)
                 return compressor
 
             async def compress(compressor, chunk: bytes) -> None:
                 nonlocal compressed_data
                 compressed_data += await to_thread.run_sync(compressor, chunk, limiter=limiter)
+                print("after compression", len(compressed_data))
 
             async def close_frame(compressor) -> None:
                 nonlocal compressed_data
-                compressed_data += await to_thread.run_sync(compressor.end, limiter=limiter)
+                compressed_data += await to_thread.run_sync(compressor.end, limiter=limiter) or b''
 
             async def send_current(data):
                 await compressed_data_send.send(data)
@@ -79,11 +80,8 @@ class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
                         with move_on_after(self._memory_constraints.timeBeforeFlush) as data_or_flush:
                             try:
                                 raw = await it.__anext__()
-                            except EndOfStream:
-                                if compressed_data:
-                                    await close_frame(compressor)
-                                    await send_current(compressed_data)
-                                return
+                            except StopAsyncIteration:  # async for exhaustion
+                                break
 
                         print("Did we get raw?", len(raw))
                         if raw:
@@ -92,11 +90,16 @@ class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
                         while len(compressed_data) >= self._memory_constraints.chunkSize:
                             print("compressed buf is full", len(compressed_data))
                             await send_current(compressed_data[:self._memory_constraints.chunkSize])
-                            buf = buf[self._memory_constraints.chunkSize:]
+                            compressed_data = compressed_data[self._memory_constraints.chunkSize:]
 
                         if data_or_flush.cancelled_caught and compressed_data:
+                            print("sending compressed data", len(compressed_data))
                             await send_current(compressed_data)
                             compressed_data = bytearray()
+
+                    if compressed_data:
+                        await close_frame(compressor)
+                        await send_current(compressed_data)
 
             tg.start_soon(compressor_main)
             yield chunk_stream
@@ -115,9 +118,8 @@ class DecompressedBytes(CommonDataBufferAsyncProcessing):
     def __init__(self, upper_stream: ObjectReceiveStream[bytes], compression_alg: CompressionAlgorithmInstance, *,
                  memory_constraints: ChunkInMemoryConstraint | None = None,
                  reset_stream: ObjectReceiveStream | None = None):
-        super().__init__(upper_stream, decompression_obj_for, compression_alg,
+        super().__init__(upper_stream, compression_obj_for, compression_alg,
                          memory_constraints=memory_constraints, reset_stream=reset_stream)
-
 
 
 if __name__ == "__main__":
@@ -130,9 +132,13 @@ if __name__ == "__main__":
     )
 
     async def main():
-        async with produce_1Go_not_random_stream() as data_generation:
+        async with produce_1Go_not_random_stream(100000) as data_generation:
             cktor = ChunkedBytes(data_generation)
-            async with CompressedBytes(cktor, calg) as compressed_chunks:
-                await process_items(compressed_chunks)
+            async with (
+                CompressedBytes(cktor, calg) as compressed_chunks,
+                FakeNetworkTransmission(compressed_chunks) as net,
+                DecompressedBytes(net, calg) as decompressed_chunks
+            ):
+                await process_items(decompressed_chunks)
 
     anyio.run(main)
