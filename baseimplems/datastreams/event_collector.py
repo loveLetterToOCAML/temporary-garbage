@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from baseimplems.anyio_utils import run_within
 from baseimplems.datastreams.stream_event import StreamEvent, StreamStarting, base_event_from, \
     StreamEnding, StreamEndReason, BytesStreamEvent, TransitStatus, ChunkStreamEvent, ObjectStreamEvent, SleepEvent, \
     StreamIdentifier, StreamEventType
@@ -85,6 +86,8 @@ class StatsForStream:
             case _:
                 print("other", type(streaming_event))
 
+current_stats_stream = ContextVar[StatsForStream]('stats_stream')
+run_with_stats_stream = run_within(StatsForStream, current_stats_stream)
 
 
 class StreamEventStream:
@@ -190,12 +193,22 @@ class EventCollector(AsyncContextManagerMixin):
         return StreamEventStream(f_name, idx, utc_now(), hex(randint(0, 0xffffffff)))
 
 
+@asynccontextmanager
+async def default_prepare_event_handlers_context():
+    async with (
+        run_with_stats_stream(),
+        print_with_threshold as send_to_print_with_threshold
+    ):
+        yield {'async_handlers': [current_stats_stream.get, send_to_print_with_threshold]}
 
-stream_event_collector = ContextVar[EventCollector](
-    'stream_events', default=EventCollector(
-        sync_handlers=[default_test_print_stream_event],
-        async_handlers=[StatsForStream()]
-    )
+stream_event_collector = ContextVar[EventCollector]('stream_events')
+run_with_event_collector = run_within(
+    EventCollector,
+    stream_event_collector,
+    default_bind_static_arguments = {
+        'sync_handlers': [default_test_print_stream_event],
+    },
+    upper_context_dependency=default_prepare_event_handlers_context
 )
 current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_event_stream')
 

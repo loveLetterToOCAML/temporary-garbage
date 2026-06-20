@@ -1,3 +1,5 @@
+from contextlib import _AsyncGeneratorContextManager
+
 from basetypes.implementation.exceptions.common_exceptions import ExpectedTypeException, HumanReadableException
 from utils.custom_context_var import ContextVarWrapper
 
@@ -48,6 +50,7 @@ def bind_dynamic(context_var: ContextVar | ContextVarWrapper, **kwargs):
 def run_within(ModelType: Type, ctxt: ContextVar | ContextVarWrapper,
                default_bind_static_arguments: dict[str, Any] = None,
                default_bind_callable_arguments: dict[str, Callable] = None,
+               upper_context_dependency: _AsyncGeneratorContextManager[dict[str, Any]] | None = None,
                with_static_bound_arguments: bool = True,
                with_dynamic_bound_arguments: bool = True):
 
@@ -74,14 +77,25 @@ def run_within(ModelType: Type, ctxt: ContextVar | ContextVarWrapper,
             if ctxt in da:
                 for k in da[ctxt]:
                     additional[k] = da[ctxt][k]()
-        instance = instance or ModelType(**additional, **kwargs)
-        previous_instance = ctxt.set(instance)
 
-        try:
-            async with _with_cascade_context_updates(ctxt, instance):
+        @contextlib.asynccontextmanager
+        async def finish(instance):
+            previous_instance = ctxt.set(instance)
+            try:
+                async with _with_cascade_context_updates(ctxt, instance):
+                    yield
+            finally:
+                ctxt.reset(previous_instance)
+
+        if upper_context_dependency:
+            async with upper_context_dependency() as additional_from_upper_layer:
+                instance = instance or ModelType(**additional, **kwargs, **additional_from_upper_layer)
+                async with finish(instance):
+                    yield instance
+        else:
+            instance = instance or ModelType(**additional, **kwargs)
+            async with finish(instance):
                 yield instance
-        finally:
-            ctxt.reset(previous_instance)
 
     return run_with_ctxt_manager
 

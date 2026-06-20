@@ -1,5 +1,5 @@
 from baseimplems.datastreams.event_collector import next_stream_event_collector, current_stream_event_stream, \
-    stream_event_collector
+    stream_event_collector, run_with_event_collector
 from baseimplems.datastreams.stream_event import TransitStatus
 
 from contextlib import asynccontextmanager
@@ -103,6 +103,7 @@ if __name__ == '__main__':
 
     async def main():
         async with (
+            run_with_event_collector(),
             stream_event_collector.get(),
             create_task_group() as tg,
         ):
