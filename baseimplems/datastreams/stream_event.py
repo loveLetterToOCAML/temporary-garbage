@@ -2,7 +2,7 @@ from typing import Literal
 
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root_params import RootSerial
-from baseimplems.utils import utc_now
+from baseimplems.date_utils import utc_now
 
 from pydantic import BaseModel
 
@@ -38,9 +38,9 @@ class StreamEvent(BaseEvent, StreamIdentifier):
     pass
 
 class StreamEndReason(Enum):
-    END_OF_INPUT = 1
-    EXTERNAL_SIGNAL = 2
-    EXCEPTION_DURING_WRITE = 3
+    END_OF_INPUT = 1      # normal termination of stream
+    EXTERNAL_SIGNAL = 2   # external upper cancellation (timeout or any cancel)
+    EXCEPTION_DURING_PROCESS = 3   # "internal" cancellation from below processing streams
 
 
 class StreamStarting(StreamEvent):

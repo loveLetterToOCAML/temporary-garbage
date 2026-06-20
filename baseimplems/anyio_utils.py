@@ -1,0 +1,114 @@
+from basetypes.implementation.exceptions.common_exceptions import ExpectedTypeException, HumanReadableException
+from utils.custom_context_var import ContextVarWrapper
+
+from typing import Type, Any, Callable, AsyncContextManager
+from typing_extensions import AsyncIterable
+from contextvars import ContextVar
+import contextlib
+
+
+_reset_wrapping_context_managers = ContextVarWrapper('reset_wrapping_context_managers', default={})
+
+def register_manager_on_context_update(ctxt: ContextVar | ContextVarWrapper, ctxt_manager: AsyncContextManager):
+    _reset_wrapping_context_managers.setdefault(ctxt, []).append(ctxt_manager)
+
+
+@contextlib.asynccontextmanager
+async def _with_cascade_context_updates(modified_contextvar: ContextVar, instance):
+    if modified_contextvar in _reset_wrapping_context_managers.get():
+        async with contextlib.AsyncExitStack() as stack:
+            _ = [stack.enter_context(async_manager(instance)) for async_manager in _reset_wrapping_context_managers.get()[modified_contextvar]]
+            yield
+    else:
+        yield
+
+
+_static_arguments_for_context = ContextVar('static_arguments', default={})
+_dynamic_callable_arguments_for_context = ContextVar('dynamic_arguments', default={})
+
+@contextlib.contextmanager
+def bind_static(context_var: ContextVar | ContextVarWrapper, **kwargs):
+    prev = _static_arguments_for_context.get().setdefault(context_var, {})
+    try:
+        _static_arguments_for_context.get()[context_var] = {**prev, **kwargs}
+        yield
+    finally:
+        _static_arguments_for_context.get()[context_var] = prev
+
+@contextlib.contextmanager
+def bind_dynamic(context_var: ContextVar | ContextVarWrapper, **kwargs):
+    prev = _dynamic_callable_arguments_for_context.get().setdefault(context_var, {})
+    try:
+        _dynamic_callable_arguments_for_context.get()[context_var] = {**prev, **kwargs}
+        yield
+    finally:
+        _dynamic_callable_arguments_for_context.get()[context_var] = prev
+
+
+def run_within(ModelType: Type, ctxt: ContextVar | ContextVarWrapper,
+               default_bind_static_arguments: dict[str, Any] = None,
+               default_bind_callable_arguments: dict[str, Callable] = None,
+               with_static_bound_arguments: bool = True,
+               with_dynamic_bound_arguments: bool = True):
+
+    @contextlib.asynccontextmanager
+    async def run_with_ctxt_manager(instance: ModelType | None = None, **kwargs) -> AsyncIterable[ModelType]:
+        if instance and not isinstance(instance, ModelType):
+            raise ExpectedTypeException(got=type(instance), expected=ModelType)
+        if instance and kwargs:
+            raise HumanReadableException('Expected no kwargs when giving already defined instance in run_within')
+        additional = {}
+        for k in default_bind_callable_arguments or {}:
+            if k not in kwargs:
+                additional[k] = default_bind_callable_arguments[k]()
+        for k in default_bind_static_arguments or {}:
+            if k not in kwargs and k not in additional:
+                additional[k] = default_bind_static_arguments[k]
+        if with_static_bound_arguments:
+            sa = _static_arguments_for_context.get()
+            if ctxt in sa:
+                for k in sa[ctxt]:
+                    additional[k] = sa[ctxt][k]
+        if with_dynamic_bound_arguments:
+            da = _dynamic_callable_arguments_for_context.get()
+            if ctxt in da:
+                for k in da[ctxt]:
+                    additional[k] = da[ctxt][k]()
+        instance = instance or ModelType(**additional, **kwargs)
+        previous_instance = ctxt.set(instance)
+
+        try:
+            async with _with_cascade_context_updates(ctxt, instance):
+                yield instance
+        finally:
+            ctxt.reset(previous_instance)
+
+    return run_with_ctxt_manager
+
+
+run_within_new_default_static_arguments = run_within(dict, _static_arguments_for_context)
+run_within_new_default_dynamic_arguments = run_within(dict, _dynamic_callable_arguments_for_context)
+
+
+if __name__ == '__main__':
+    from anyio import run
+
+    async def main():
+        c1 = ContextVar[dict]('testcvar')
+        t1 = run_within(dict, c1,
+                        default_bind_static_arguments={'v1': 1, 'still': 'default val should be rewritten'},
+                        default_bind_callable_arguments={'v2': lambda: '2'})
+        with bind_static(c1, still2='stillthere'):
+            with (
+                bind_static(c1, still='stillthere2'),
+                bind_dynamic(c1, still2=lambda: 8888)
+            ):
+                async with t1(nextarg1=6, nextarg2='other') as x:
+                    print(x)
+            async with t1(nextarg1=1337, nextarg2='other3') as x:
+                print(x)
+
+            async with t1('fail') as x:
+                print(x)
+
+    run(main)

@@ -1,4 +1,6 @@
-from basetypes.implementation.basetypes_match import DefaultBaseType
+from typing import Any
+
+from basetypes.implementation.basetypes_match import DefaultBaseType, supported_base_types_attributes
 from basetypes.context.implementation_context import BaseTypesModel
 
 from basetypes.a_root import SerialType, Root, SerializationNode
@@ -14,7 +16,8 @@ class BaseDataType(Enum):
     DECIMAL = 5
     STRING = 6
     BYTES = 7
-    ENUM = 8
+    INT_ENUM = 8
+    STR_ENUM = 9
 
     # from there and below all subtypes are kind of string with constraints on formatting or semantics
     OPAQUE = 100     # like bytes but may contain additional information about source / destination the opaque is dedicated to
@@ -100,7 +103,8 @@ class BaseData(SerializationNode):
     DECIMAL = ...
     STRING = ...
     BYTES = ...
-    ENUM = ...
+    INT_ENUM = ...
+    STR_ENUM = ...
     OPAQUE = ...
     TYPE = ...
     CHILD_TYPE = ...
@@ -179,6 +183,15 @@ ExternalDataFormatBase: DataformatBase = Base.register_serialization_child(BaseD
 # dependency injection at runtime? Guess this will be fixed and should not change a lot)
 BaseTypes: DefaultBaseType = BaseTypesModel.get()
 
+for attr_name in supported_base_types_attributes:
+    Base.register_serialization_leaf(getattr(BaseDataType, attr_name), getattr(BaseTypes, attr_name))
+
+# TODO: recursive descent on other basetypes ExternalNetworkBase, ExternalSocialBase or ExternalDataFormatBase
+def attempt_serial_type(obj: Any):
+    for t in supported_base_types_attributes:
+        if type(obj) == getattr(DefaultBaseType, t):
+            return getattr(BaseDataType, t)
+
 
 if __name__ == '__main__':
     from basetypes.autocomplete_helper import generate_autocompletion_for_enum
@@ -186,3 +199,6 @@ if __name__ == '__main__':
     print(generate_autocompletion_for_enum(ExternalNetworkBaseType))
     print(generate_autocompletion_for_enum(ExternalSocialBaseType))
     print(generate_autocompletion_for_enum(DataformatBaseType))
+
+    print(attempt_serial_type('test'))
+    print(Base.path_until(attempt_serial_type('test')))

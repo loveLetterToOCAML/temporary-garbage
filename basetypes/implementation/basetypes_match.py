@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from typing import Dict, Any, List
 from decimal import Decimal
+from types import NoneType
 import datetime
 
 
@@ -42,7 +43,7 @@ class SparseObject(BaseModel):
 
 # left is serialization repr, right is related python default type for it
 class DefaultBaseType:
-    NONE = None
+    NONE = NoneType
     BOOL = bool
     INT = int
     FLOAT = float

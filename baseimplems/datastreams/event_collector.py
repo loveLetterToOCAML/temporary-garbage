@@ -1,39 +1,56 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
-
 from baseimplems.datastreams.stream_event import StreamEvent, StreamStarting, base_event_from, \
     StreamEnding, StreamEndReason, BytesStreamEvent, TransitStatus, ChunkStreamEvent, ObjectStreamEvent, SleepEvent, \
     StreamIdentifier, StreamEventType
+from basetests.objects_consumer import stream_event_consumer_max_events
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root_params import RootSerial
-from baseimplems.utils import utc_now
+from baseimplems.date_utils import utc_now
 
-from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream
+from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream, get_cancelled_exc_class
+from pydantic import BaseModel
 import anyio
 
 from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
+from typing import Type, Dict, Callable, Awaitable, TypeVar
+from typing_extensions import Generic
 from contextvars import ContextVar
 from datetime import timedelta
 from random import randint
-from typing import Type, Dict, Callable, Awaitable
 
 
 default_test_print_stream_event = print
 
+print_with_threshold = stream_event_consumer_max_events(print, is_sync=True)
+
+
+class TimeStat(BaseModel):
+    perSecondMean: float
+    perSecondDeviation: float
 
 class GlobalStreamStats(BaseModel):
     currentlyRunning: int
     finished: int
+    timeStats: TimeStat
+
+
+T = TypeVar('T')
+
+class StatPerStatus(BaseModel, Generic[T]):
+    successfullyExchanged: T = 0
+    queued: T = 0
+    inProgress: T = 0
+    failed: T = 0
+    retrying: T = 0
 
 class StatsPerStatus(BaseModel):
-    successfullyExchanged: int
-    queued: int
-    inProgress: int
-    failed: int
-    retrying: int
+    rawPackets: StatPerStatus[int]
+    perSecondMeans: StatPerStatus[float]
+    perSecondDeviations: StatPerStatus[float]
 
-StatsPerType = Dict[StreamEventType, StatsPerStatus | int]
+
+StatsPerType = Dict[StreamEventType, StatsPerStatus | TimeStat]
 StatsPerStream = Dict[StreamIdentifier, StatsPerType]
 
 
@@ -51,9 +68,20 @@ class StatsForStream:
         stream_key = (streaming_event.name, streaming_event.index)
         self._stream_infos.setdefault(stream_key, streaming_event)
         print(streaming_event)
+        return
         match streaming_event:
             case BytesStreamEvent():
-                print("bytes")
+                self._update_dict(self._bytes_stats)
+            case ChunkStreamEvent():
+                self._update_dict(self._chunk_stats)
+            case ObjectStreamEvent():
+                self._update_dict(self._object_stats)
+            case StreamStarting():
+                self._update_stream_starting(self._stream_stats)
+            case StreamEnding():
+                self._update_stream_ending(self._stream_stats)
+            case SleepEvent():
+                self._update_dict(self._sleep_stats)
             case _:
                 print("other", type(streaming_event))
 
@@ -120,7 +148,7 @@ class EventCollector(AsyncContextManagerMixin):
         self._async_handlers = async_handlers
         self._handlers_ok = {}
         self._limiter = anyio.CapacityLimiter(max_number_of_tasks)
-        self._send_event, self._on_receive = create_memory_object_stream[StreamEvent](max_buffer_size=max_buffer_capacity)
+        self._send_event, self._on_receive = create_memory_object_stream[StreamEvent](max_buffer_size=0x1000)
 
     async def _consumer(self):
         async with self._on_receive:
@@ -130,7 +158,6 @@ class EventCollector(AsyncContextManagerMixin):
                         try:
                             sync_handler(data)
                         except Exception as e:
-                            print("BAD", e)
                             self._handlers_ok[(sync_handler, True)] = False
                 for async_handler in self._async_handlers:
                     async with self._limiter:
@@ -138,7 +165,6 @@ class EventCollector(AsyncContextManagerMixin):
                             try:
                                 await async_handler(data)
                             except Exception as e:
-                                print("BAD", e)
                                 self._handlers_ok[(async_handler, False)] = False
 
     @asynccontextmanager
@@ -174,6 +200,7 @@ stream_event_collector = ContextVar[EventCollector](
 current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_event_stream')
 
 
+
 @asynccontextmanager
 async def next_stream_event_collector(f_name, send_start_event: bool = True):
     csec = stream_event_collector.get()
@@ -181,13 +208,14 @@ async def next_stream_event_collector(f_name, send_start_event: bool = True):
     prev = current_stream_event_stream.set(sec)
     reason = StreamEndReason.END_OF_INPUT
     try:
-        if send_start_event:
-            await sec.new_stream_start_event()
+        with anyio.CancelScope() as inner:  # just to know case of stream stop (distinguisher between external and internal)
+            if send_start_event:
+                await sec.new_stream_start_event()
         yield sec
-    except Exception as e:
-        print("RECEIVED EXCEPTION IN TASK", e)
-    except KeyboardInterrupt:
-        reason = StreamEndReason.EXTERNAL_SIGNAL
+    except get_cancelled_exc_class():
+        print("CAUGHT", inner.cancelled_caught)
+        reason = StreamEndReason.EXCEPTION_DURING_PROCESS
+        raise
     finally:
         await sec.new_stream_end_event(reason)
         current_stream_event_stream.reset(prev)

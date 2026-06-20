@@ -1,6 +1,10 @@
 from enum import Enum, EnumType
 from typing import Type
 
+from pydantic import BaseModel
+
+from basetypes.a_root_params import RootSerialFromModel
+
 
 class SerialType(Enum):
     Optimized = 1       # specific convention between communication systems to optimize size of produced serialization
@@ -55,6 +59,18 @@ class SerializationNode:
                     (ChildEnum, self.path_until() + bytes([enum_value.value]))
         setattr(self, enum_value.name, child)
         return child
+
+    def register_serialization_leaf(self, enum_value: Enum, LeafModelType: BaseModel | Type):
+        assert isinstance(enum_value, self._ChildEnumType)
+        assert getattr(self, enum_value.name, None) in (..., None), \
+            f"Enum value {enum_value} already in children for current serialization node at {self._path.hex()}"
+        if issubclass(LeafModelType, BaseModel):
+            setattr(self, enum_value.name, RootSerialFromModel(LeafModelType, self.path_until(enum_value)))
+        else:
+            setattr(self, enum_value.name, LeafModelType)
+
+    def leaf_object_constructor(self, enum_value: Enum):
+        return getattr(self, enum_value.name)
 
     def path_until(self, member_enum: Enum | None = None) -> bytes:
         return self._path if not member_enum else self._path + bytes([member_enum.value])

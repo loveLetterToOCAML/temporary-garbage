@@ -1,9 +1,9 @@
 # forced to split RootParams declaration from Root declaration to avoid circular dependency with BaseDataType
 from basetypes.implementation.basetypes_match import DefaultBaseType
-from basetypes.a_root import Root
 
 from pydantic import BaseModel
 
+from typing import Type
 from enum import Enum
 
 
@@ -17,3 +17,18 @@ class SerialParams(Enum):
     Type = 1
 
 #RootParams = register_serialization_params_context(Root, SerialParams)
+
+
+def RootSerialFromModel(RootSerialModel: Type, path_in_tree: bytes):
+    Sub = type(
+        RootSerialModel.__name__ + 'bis',
+        (RootSerialModel, RootSerial),
+        {
+            "__annotations__": {
+                "Type": DefaultBaseType.TYPE,
+                **getattr(RootSerialModel, "__annotations__", {}),
+            },
+            "Type": path_in_tree,
+        },
+    )
+    return Sub
