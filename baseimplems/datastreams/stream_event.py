@@ -27,11 +27,12 @@ def base_event_from(start: datetime):
 class StreamIdentifier(BaseModel):
     name: str
     index: int
+    randomId: int  # this is used to ensure unicity of streams globally event with multiple event manager at same time
 
     model_config = {"frozen": True}
 
     def __hash__(self):
-        return hash((self.name, self.index))
+        return hash((self.name, self.index, self.randomId))
 
 
 class StreamEvent(BaseEvent, StreamIdentifier):

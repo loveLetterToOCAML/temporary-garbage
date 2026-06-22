@@ -21,7 +21,7 @@ def within_new_bytes_event_stream(f):
 
 
 @within_new_bytes_event_stream
-async def create_random_stream(data_size=1000000000, max_bound=0x10000):
+async def create_random_stream(data_size=1000000000, max_bound=0x1000):
     ctr = 0
     while ctr < data_size:
         sz = randint(1, max_bound)
@@ -54,7 +54,7 @@ class StreamType(Enum):
     RANDOM = 1
     FIXED = 2
 
-async def produce_test_data(stream_type: StreamType, data_size=1000000, *args):
+async def produce_test_data(stream_type: StreamType, data_size=10000000, *args):
     if stream_type is StreamType.RANDOM:
         f = create_random_stream
     elif stream_type is StreamType.FIXED:
@@ -64,7 +64,6 @@ async def produce_test_data(stream_type: StreamType, data_size=1000000, *args):
 
     async for bytes_chunk in f(data_size, *args):
         yield bytes_chunk
-
 
 
 @within_new_bytes_event_stream
@@ -88,9 +87,9 @@ async def bytes_generator_to_stream(gen, max_buffer_size=0x1000):
 
 
 if __name__ == '__main__':
-    from anyio import run, sleep, create_memory_object_stream, create_task_group
+    from baseimplems.datastreams.event_processing import current_stats_stream, StatsIntent
+    from anyio import run, sleep, create_memory_object_stream, create_task_group, move_on_after
     from hashlib import sha256, sha512
-
 
     async def per_f(f, *args):
         h1 = sha256()
@@ -101,13 +100,26 @@ if __name__ == '__main__':
         print("sha256", h1.hexdigest())
         print("sha512", h2.hexdigest())
 
+    async def regularly_ask_stats(send_intent, receive_stats):
+        async with (
+            send_intent,
+            receive_stats,
+        ):
+            while True:
+                with move_on_after(0.3) as _:
+                    async for data in receive_stats:
+                        print("DATA", data)
+                await send_intent.send(StatsIntent(intentType=randint(0, 15)))
+
     async def main():
         async with (
             run_with_event_collector(),
             stream_event_collector.get(),
             create_task_group() as tg,
+            current_stats_stream.get() as (send_intent, receive_stats)
         ):
             tg.start_soon(per_f, produce_test_data, StreamType.RANDOM)
             tg.start_soon(per_f, produce_test_data, StreamType.FIXED)
+            tg.start_soon(regularly_ask_stats, send_intent, receive_stats)
 
     run(main)

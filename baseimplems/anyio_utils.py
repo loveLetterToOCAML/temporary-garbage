@@ -9,6 +9,12 @@ from contextvars import ContextVar
 import contextlib
 
 
+class NotInAsyncContextManager(Exception):
+
+    def __init__(self, method_name, class_name):
+        super().__init__(f"`{method_name}` function of {class_name} intends to be executed within `async with [{class_name}_instance]`")
+
+
 _reset_wrapping_context_managers = ContextVarWrapper('reset_wrapping_context_managers', default={})
 
 def register_manager_on_context_update(ctxt: ContextVar | ContextVarWrapper, ctxt_manager: AsyncContextManager):

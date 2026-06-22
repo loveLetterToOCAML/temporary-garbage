@@ -24,31 +24,46 @@ async def stream_event_consumer(consumer_function: Callable[[StreamEvent], Await
 
 @asynccontextmanager
 async def stream_event_consumer_max_events(consumer_function: Callable[[StreamEvent], Awaitable[None]],
-                                           max_per_second: float = 1.0, max_events_retained: int = 10, is_sync: bool = False):
+                                           max_per_second: float = 10.0, max_events_retained: int = 10, is_sync: bool = False):
     remote_send_stream, local_receive_stream = create_memory_object_stream[StreamEvent](max_buffer_size=1)
+
+    def new_sliding_window():
+        return [None for _ in range(max_events_retained)]
 
     async with create_task_group() as tg:
         async def consumer():
-            sliding_window = [None for _ in range(max_events_retained)]
-            cursor = 0
-            print_at = 0
+            sliding_window = {}
+            cursor = {}
+            print_at = {}
             async with local_receive_stream:
+                it = local_receive_stream.__aiter__()
                 while True:
                     with move_on_after(1.0 / max_per_second) as _:
-                        async for data in local_receive_stream:
-                            sliding_window[cursor % max_events_retained] = data
-                            cursor += 1
-                            if cursor % max_events_retained == print_at:
-                                print_at += 1
+                        while True:
+                            try:
+                                data: StreamEvent = await it.__anext__()
+                            except StopAsyncIteration:  # async for exhaustion
+                                return
 
-                    if not sliding_window[print_at % max_events_retained]:
-                        continue
+                            k = hash(data)
+                            cursor.setdefault(k, 0)
+                            print_at.setdefault(k, 0)
+                            sliding_window.setdefault(k, new_sliding_window())
+                            sliding_window[k][cursor[k] % max_events_retained] = data
+                            cursor[k] += 1
+                            if cursor[k] % max_events_retained == print_at[k] % max_events_retained:
+                                print_at[k] += 1
 
-                    if is_sync:
-                        consumer_function(sliding_window[print_at % max_events_retained])
-                    else:
-                        await consumer_function(sliding_window[print_at % max_events_retained])
-                    print_at += 1
+                    for key in sliding_window:
+                        if not sliding_window[key][print_at[key] % max_events_retained]:
+                            continue
+
+                        if cursor[key] % max_events_retained != print_at[key] % max_events_retained:
+                            if is_sync:
+                                consumer_function(sliding_window[key][print_at[key] % max_events_retained])
+                            else:
+                                await consumer_function(sliding_window[key][print_at[key] % max_events_retained])
+                            print_at[key] += 1
 
         tg.start_soon(consumer)
         yield remote_send_stream

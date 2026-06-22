@@ -1,101 +1,31 @@
 from __future__ import annotations
 
-from baseimplems.anyio_utils import run_within
+from baseimplems.datastreams.event_processing import run_with_stats_stream, print_with_threshold, current_stats_stream
 from baseimplems.datastreams.stream_event import StreamEvent, StreamStarting, base_event_from, \
-    StreamEnding, StreamEndReason, BytesStreamEvent, TransitStatus, ChunkStreamEvent, ObjectStreamEvent, SleepEvent, \
-    StreamIdentifier, StreamEventType
-from basetests.objects_consumer import stream_event_consumer_max_events
+    StreamEnding, StreamEndReason, BytesStreamEvent, TransitStatus, ChunkStreamEvent, ObjectStreamEvent, SleepEvent
+from baseimplems.anyio_utils import run_within, NotInAsyncContextManager
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root_params import RootSerial
 from baseimplems.date_utils import utc_now
 
 from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream, get_cancelled_exc_class
-from pydantic import BaseModel
 import anyio
 
 from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
-from typing import Type, Dict, Callable, Awaitable, TypeVar
-from typing_extensions import Generic
+from typing import Type, Callable, Awaitable
 from contextvars import ContextVar
 from datetime import timedelta
 from random import randint
 
-
-default_test_print_stream_event = print
-
-print_with_threshold = stream_event_consumer_max_events(print, is_sync=True)
-
-
-class TimeStat(BaseModel):
-    perSecondMean: float
-    perSecondDeviation: float
-
-class GlobalStreamStats(BaseModel):
-    currentlyRunning: int
-    finished: int
-    timeStats: TimeStat
-
-
-T = TypeVar('T')
-
-class StatPerStatus(BaseModel, Generic[T]):
-    successfullyExchanged: T = 0
-    queued: T = 0
-    inProgress: T = 0
-    failed: T = 0
-    retrying: T = 0
-
-class StatsPerStatus(BaseModel):
-    rawPackets: StatPerStatus[int]
-    perSecondMeans: StatPerStatus[float]
-    perSecondDeviations: StatPerStatus[float]
-
-
-StatsPerType = Dict[StreamEventType, StatsPerStatus | TimeStat]
-StatsPerStream = Dict[StreamIdentifier, StatsPerType]
-
-
-class StatsForStream:
-
-    def __init__(self):
-        self._stream_infos = {}
-        self._stream_stats = {}
-        self._bytes_stats = {}
-        self._chunk_stats = {}
-        self._object_stats = {}
-        self._sleep_stats = {}
-
-    async def __call__(self, streaming_event: StreamEvent):
-        stream_key = (streaming_event.name, streaming_event.index)
-        self._stream_infos.setdefault(stream_key, streaming_event)
-        print(streaming_event)
-        return
-        match streaming_event:
-            case BytesStreamEvent():
-                self._update_dict(self._bytes_stats)
-            case ChunkStreamEvent():
-                self._update_dict(self._chunk_stats)
-            case ObjectStreamEvent():
-                self._update_dict(self._object_stats)
-            case StreamStarting():
-                self._update_stream_starting(self._stream_stats)
-            case StreamEnding():
-                self._update_stream_ending(self._stream_stats)
-            case SleepEvent():
-                self._update_dict(self._sleep_stats)
-            case _:
-                print("other", type(streaming_event))
-
-current_stats_stream = ContextVar[StatsForStream]('stats_stream')
-run_with_stats_stream = run_within(StatsForStream, current_stats_stream)
 
 
 class StreamEventStream:
 
     def __init__(self, name, index, date_creation, additional_discriminant):
         self._stream_infos = {
-            'name': f"{name}-{additional_discriminant}",
-            'index': index
+            'name': name,
+            'index': index,
+            'randomId': additional_discriminant
         }
         self._absolute_creation_time = date_creation
 
@@ -135,23 +65,17 @@ class StreamEventStream:
         await self._internal_new_event_send(SleepEvent, delay=delay)
 
 
-class NotInAsyncContextManager(Exception):
-
-    def __init__(self, method_name, class_name):
-        super().__init__(f"`{method_name}` function of {class_name} intends to be executed within `async with [{class_name}_instance]`")
-
-
 class EventCollector(AsyncContextManagerMixin):
 
-    def __init__(self, sync_handlers: list[Callable[[StreamEvent], None]],
-                 async_handlers: list[Callable[[StreamEvent], Awaitable[None]]],
+    def __init__(self, sync_handlers: list[Callable[[StreamEvent], None]] | None = None,
+                 async_handlers: list[Callable[[StreamEvent], Awaitable[None]]] | None = None,
                  max_number_of_tasks: int = 0x20, max_buffer_capacity=0x1000):
         self._current_stream_index = 0
-        self._sync_handlers = sync_handlers
-        self._async_handlers = async_handlers
+        self._sync_handlers = sync_handlers or []
+        self._async_handlers = async_handlers or []
         self._handlers_ok = {}
         self._limiter = anyio.CapacityLimiter(max_number_of_tasks)
-        self._send_event, self._on_receive = create_memory_object_stream[StreamEvent](max_buffer_size=0x1000)
+        self._send_event, self._on_receive = create_memory_object_stream[StreamEvent](max_buffer_size=max_buffer_capacity)
 
     async def _consumer(self):
         async with self._on_receive:
@@ -190,24 +114,25 @@ class EventCollector(AsyncContextManagerMixin):
 
     def next_stream_event_collector(self, f_name: str) -> StreamEventStream:
         idx, self._current_stream_index = self._current_stream_index, self._current_stream_index + 1
-        return StreamEventStream(f_name, idx, utc_now(), hex(randint(0, 0xffffffff)))
+        return StreamEventStream(f_name, idx, utc_now(), (randint(0, 0xffffffff)))
 
 
 @asynccontextmanager
 async def default_prepare_event_handlers_context():
     async with (
         run_with_stats_stream(),
-        print_with_threshold as send_to_print_with_threshold
+        print_with_threshold as send_to_print_with_threshold,
+        send_to_print_with_threshold
     ):
-        yield {'async_handlers': [current_stats_stream.get, send_to_print_with_threshold]}
+        yield {'async_handlers': [current_stats_stream.get, send_to_print_with_threshold.send]}
 
 stream_event_collector = ContextVar[EventCollector]('stream_events')
 run_with_event_collector = run_within(
     EventCollector,
     stream_event_collector,
-    default_bind_static_arguments = {
-        'sync_handlers': [default_test_print_stream_event],
-    },
+    #default_bind_static_arguments = {
+    #    'sync_handlers': [default_test_print_stream_event],
+    #},
     upper_context_dependency=default_prepare_event_handlers_context
 )
 current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_event_stream')
@@ -224,11 +149,13 @@ async def next_stream_event_collector(f_name, send_start_event: bool = True):
         with anyio.CancelScope() as inner:  # just to know case of stream stop (distinguisher between external and internal)
             if send_start_event:
                 await sec.new_stream_start_event()
-        yield sec
-    except get_cancelled_exc_class():
-        print("CAUGHT", inner.cancelled_caught)
+            yield sec
+    except get_cancelled_exc_class() as e:
+        print("CAUGHT", inner.cancelled_caught, type(e))
         reason = StreamEndReason.EXCEPTION_DURING_PROCESS
         raise
+    except Exception as e:
+        print("CAUGH2", type(e))
     finally:
         await sec.new_stream_end_event(reason)
         current_stream_event_stream.reset(prev)
