@@ -4,10 +4,10 @@ from baseimplems.datastreams.chunk import ChunkInMemoryConstraint, ChunkedBytes
 
 from pydantic import BaseModel
 
-from anyio import AsyncContextManagerMixin, create_memory_object_stream, to_thread, move_on_after, EndOfStream
+from anyio import AsyncContextManagerMixin, create_memory_object_stream, to_thread, move_on_after
 from anyio.abc import ObjectReceiveStream
 from contextlib import asynccontextmanager
-from typing import Callable
+from typing import Callable, AsyncIterator
 import anyio
 
 
@@ -23,7 +23,7 @@ class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
         self._parameters_for_sync_obj = parameters_for_sync_obj
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self):
+    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[bytes]]:
         compressed_data_send, compressed_data_stream = create_memory_object_stream[bytes](
             max_buffer_size=self._memory_constraints.chunkSize
         )
@@ -124,21 +124,45 @@ class DecompressedBytes(CommonDataBufferAsyncProcessing):
 
 if __name__ == "__main__":
     from basetypes.implementation.dataformat.compression import  CompressionAlgorithm, GzipCompressionParameters
-    from basetests.chunk import produce_1Go_not_random_stream, process_items
+    from basetests.bytes_producer import produce_test_data, StreamType, bytes_generator_to_stream
+    from baseimplems.datastreams.event_collector import run_with_event_collector, stream_event_collector
+    from anyio import create_task_group
+    from hashlib import sha256, sha512
 
     calg = CompressionAlgorithmInstance(
         type=CompressionAlgorithm.GZIP,
         compressionParameters=GzipCompressionParameters()
     )
 
+    async def compute_hash(stream):
+        h1 = sha256()
+        h2 = sha512()
+        async for chunk in stream:
+            h1.update(chunk)
+            h2.update(chunk)
+        print("sha256", h1.hexdigest())
+        print("sha512", h2.hexdigest())
+
     async def main():
-        async with produce_1Go_not_random_stream(100000) as data_generation:
+        async with (
+            run_with_event_collector(),
+            stream_event_collector.get(),
+            bytes_generator_to_stream(produce_test_data, StreamType.FIXED) as data_generation
+        ):
             cktor = ChunkedBytes(data_generation)
             async with (
-                CompressedBytes(cktor, calg) as compressed_chunks,
-                FakeNetworkTransmission(compressed_chunks) as net,
-                DecompressedBytes(net, calg) as decompressed_chunks
+                cktor as base_chunks,
+                base_chunks.clone() as clone1,
+                base_chunks.clone() as clone2,
+                clone1,
+                clone2,
+                CompressedBytes(clone1, calg) as compressed_chunks,
+                #FakeNetworkTransmission(compressed_chunks) as net,
+                DecompressedBytes(compressed_chunks, calg) as decompressed_chunks,
+                create_task_group() as tg,
             ):
-                await process_items(decompressed_chunks)
+                print(clone2)
+                tg.start_soon(compute_hash, clone2)
+                tg.start_soon(compute_hash, decompressed_chunks)
 
     anyio.run(main)

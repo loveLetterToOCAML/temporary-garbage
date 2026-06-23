@@ -1,19 +1,19 @@
-from contextlib import asynccontextmanager
-from datetime import datetime
-from enum import IntFlag
-
-from anyio import create_task_group, create_memory_object_stream, AsyncContextManagerMixin
-
 from baseimplems.datastreams.stream_event import StreamEventType, StreamIdentifier, StreamEvent, TransitStatus, \
     BytesStreamEvent, ChunkStreamEvent, ObjectStreamEvent, StreamStarting, StreamEnding, SleepEvent
 from basetests.objects_consumer import stream_event_consumer_max_events
 from baseimplems.anyio_utils import run_within
 
+from anyio import create_task_group, create_memory_object_stream, AsyncContextManagerMixin
 from pydantic import BaseModel
 
 from typing import TypeVar, Generic, Dict, List
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import datetime
+from enum import IntFlag
 import math
+import time
 
 
 default_test_print_stream_event = print
@@ -21,30 +21,89 @@ default_test_print_stream_event = print
 print_with_threshold = stream_event_consumer_max_events(print, is_sync=True)
 
 
+@dataclass
+class TimeStatInternal:
+    # per-event
+    n:            int   = 0
+    _mean_evt:    float = 0.0
+    _M2_evt:      float = 0.0
+    # per-second
+    t_last:       float = 0.0
+    total_time:   float = 0.0
+    total_bytes:  float = 0.0
+    _M2_rate:     float = 0.0
+    _w_mean:      float = 0.0
+
+
+    def update(self, nbytes: float) -> None:
+        t = time.monotonic()
+
+        # 1. per-event Welford (always)
+        if nbytes > 0:
+            self.n += 1
+            delta = nbytes - self._mean_evt
+            self._mean_evt += delta / self.n
+            self._M2_evt += (delta * (nbytes - self._mean_evt) - self._M2_evt) / self.n
+
+        # 2. per-second: seed on first event
+        if self.n == 1:
+            self.t_last = t
+            self.total_bytes = nbytes
+            return
+
+        dt = t - self.t_last
+        if dt < 0:
+            raise ValueError(f"non-monotonic time: dt={dt}")
+
+        self.total_bytes += nbytes
+
+        if dt == 0:
+            return  # simultaneous: bytes counted, no new rate sample
+
+        self.total_time += dt
+        self.t_last = t
+        old_mean = self._w_mean
+        rate = nbytes/dt
+        self._w_mean = old_mean + (dt / self.total_time) * (rate - self._w_mean)
+        self._M2_rate += dt * (rate - old_mean) * (rate - self._w_mean)
+
+    @property
+    def mean_bytes_per_event(self) -> float:
+        return self._mean_evt
+
+    @property
+    def std_bytes_per_event(self) -> float:
+        return math.sqrt(self._M2_evt / self.n) if self.n >= 1 else 0.0
+
+    @property
+    def mean_bytes_per_sec(self) -> float:
+        return self.total_bytes / self.total_time if self.total_time > 0 else 0.0
+
+    @property
+    def std_bytes_per_sec(self) -> float:
+        return math.sqrt(self._M2_rate / self.total_time) if self.total_time > 0 else 0.0
+
+    @property
+    def public(self):
+        return TimeStat(
+            perEventMean=self.mean_bytes_per_event,
+            perEventDeviation=self.std_bytes_per_event,
+            perSecondMean = self.mean_bytes_per_sec,
+            perSecondDeviation=self.std_bytes_per_sec,
+        )
+
+
 class TimeStat(BaseModel):
-    n: int = 0
-    perSecondMean: float = 0.0
-    perSecondDeviation: float = 0.0
-
-    def update(self, v: float) -> None:
-        self.n += 1
-        delta = v - self.perSecondMean
-        self.perSecondMean += delta / self.n
-        self.perSecondDeviation += delta * (v - self.perSecondMean)
-
-    @property
-    def variance(self) -> float:
-        return self.perSecondDeviation / (self.n - 1) if self.n >= 2 else 0.0
-
-    @property
-    def stddev(self) -> float:
-        return math.sqrt(self.variance)
+    perEventMean: float
+    perEventDeviation: float
+    perSecondMean: float
+    perSecondDeviation: float
 
 
 class GlobalStreamStats(BaseModel):
     currentlyRunning: int = 0
     finished: int = 0
-    timeStats: TimeStat = TimeStat()
+    timeStats: TimeStatInternal | TimeStat = TimeStatInternal()
 
 
 T = TypeVar('T')
@@ -57,24 +116,42 @@ class StatPerStatus(BaseModel, Generic[T]):
     retrying: T = 0
 
 def default_time_stats():
-    return StatPerStatus[TimeStat](
-        successfullyExchanged=TimeStat(),
-        queued=TimeStat(),
-        inProgress=TimeStat(),
-        failed=TimeStat(),
-        retrying=TimeStat(),
+    return StatPerStatus[TimeStatInternal](
+        successfullyExchanged=TimeStatInternal(),
+        queued=TimeStatInternal(),
+        inProgress=TimeStatInternal(),
+        failed=TimeStatInternal(),
+        retrying=TimeStatInternal(),
     )
 
 class StatsPerStatus(BaseModel):
     rawPackets: StatPerStatus[int] = StatPerStatus[int]()
     timeStats: StatPerStatus[TimeStat] = default_time_stats()
 
+def convert_to_public(data: TimeStatInternal | StatsPerStatus) -> TimeStat | StatsPerStatus:
+    match data:
+        case TimeStatInternal():
+            return data.public
+        case StatsPerStatus():
+            return StatsPerStatus(
+                rawPackets=data.rawPackets,
+                timeStats=StatPerStatus[TimeStat](
+                    successfullyExchanged=data.timeStats.successfullyExchanged.public,
+                    queued=data.timeStats.queued.public,
+                    inProgress=data.timeStats.inProgress.public,
+                    failed=data.timeStats.failed.public,
+                    retrying=data.timeStats.retrying.public,
+                )
+            )
+        case _:
+            raise NotImplementedError
+
 
 StatsPerType = Dict[StreamEventType, StatsPerStatus | TimeStat]
 StatsPerStream = Dict[StreamIdentifier, StatsPerType]
 
 
-class StatsForStream(AsyncContextManagerMixin):
+class StatsForStream:
 
     def __init__(self):
         self._stream_infos = {}
@@ -84,7 +161,7 @@ class StatsForStream(AsyncContextManagerMixin):
             StreamEventType.BYTES_EVENT: StatsPerStatus(),
             StreamEventType.CHUNK_EVENT: StatsPerStatus(),
             StreamEventType.OBJECT_EVENT: StatsPerStatus(),
-            StreamEventType.SLEEP_EVENT: TimeStat(),
+            StreamEventType.SLEEP_EVENT: TimeStatInternal(),
         }
         self._global_stats: GlobalStreamStats = GlobalStreamStats()
 
@@ -114,12 +191,11 @@ class StatsForStream(AsyncContextManagerMixin):
                 StreamEventType.BYTES_EVENT: StatsPerStatus(),
                 StreamEventType.CHUNK_EVENT: StatsPerStatus(),
                 StreamEventType.OBJECT_EVENT: StatsPerStatus(),
-                StreamEventType.SLEEP_EVENT: TimeStat(),
+                StreamEventType.SLEEP_EVENT: TimeStatInternal(),
             }
         )
         self._update_dict(self._stream_stats[stream_index][event_type], event_status, increase_of)
         self._update_dict(self._global_stats_per_type[event_type], event_status, increase_of)
-        print(self._stream_stats)
 
     async def __call__(self, streaming_event: StreamEvent):
         stream_key = hash(streaming_event)
@@ -130,6 +206,7 @@ class StatsForStream(AsyncContextManagerMixin):
         match streaming_event:
             case BytesStreamEvent():
                 self._update_all_dicts(stream_key, streaming_event.type, streaming_event.status, streaming_event.size)
+                self._global_stats.timeStats.update(0)
             case ChunkStreamEvent():
                 self._update_all_dicts(stream_key, streaming_event.type, streaming_event.status, streaming_event.size)
             case ObjectStreamEvent():
@@ -152,8 +229,14 @@ class StatsForStream(AsyncContextManagerMixin):
                 if not self._stream_statuses[stream_key].isRunning:
                     print(f"Warning should not happen, stream {stream_key} already ended")
                     return
-                self._stream_statuses[stream_key].isRunning = False
-                self._stream_statuses[stream_key].stoppedAt = streaming_event.absTime
+                self._stream_statuses[stream_key] = StreamStatus(
+                    name=self._stream_statuses[stream_key].name,
+                    index=self._stream_statuses[stream_key].index,
+                    randomId=self._stream_statuses[stream_key].randomId,
+                    isRunning=False,
+                    startedAt=self._stream_statuses[stream_key].startedAt,
+                    stoppedAt = streaming_event.absTime
+                )
                 self._global_stats.finished += 1
             case SleepEvent():
                 self._update_all_dicts(stream_key, streaming_event.type, TransitStatus.DONE, 1)
@@ -161,20 +244,33 @@ class StatsForStream(AsyncContextManagerMixin):
                 raise NotImplementedError
 
 
+class StatsForStreamProcessing(AsyncContextManagerMixin):
+
     def process_intent(self, intent):
         stream_infos = stream_stats = stats_per_type = global_stats = None
 
         if intent.intentType & StatsIntentType.STREAM_INFOS.value == StatsIntentType.STREAM_INFOS.value:
-            stream_infos = list(self._stream_statuses.values())
+            stream_infos = list(self._stats_stream._stream_statuses.values())
 
         if intent.intentType & StatsIntentType.STREAM_STATS.value == StatsIntentType.STREAM_STATS.value:
-            stream_stats = self._stream_stats
+            stream_stats = {
+                self._stats_stream._stream_infos[k]: {
+                    k2: convert_to_public(v2) for k2, v2 in v.items()
+                } for k, v in self._stats_stream._stream_stats.items()
+            }
 
         if intent.intentType & StatsIntentType.GLOBAL_STATS_PER_TYPE.value == StatsIntentType.GLOBAL_STATS_PER_TYPE.value:
-            stats_per_type = self._global_stats_per_type
+            stats_per_type = {
+                k: convert_to_public(v) for k, v in self._stats_stream._global_stats_per_type.items()
+            }
 
         if intent.intentType & StatsIntentType.GLOBAL_STATS.value == StatsIntentType.GLOBAL_STATS.value:
-            global_stats = self._global_stats
+            global_stats = GlobalStreamStats(
+                **{
+                    **self._stats_stream._global_stats.dict(),
+                    'timeStats': self._stats_stream._global_stats.timeStats.public
+                }
+            )
 
         return StatsOutput(
             streamInfos=stream_infos,
@@ -183,15 +279,15 @@ class StatsForStream(AsyncContextManagerMixin):
             globalStats=global_stats
         )
 
-
     @asynccontextmanager
     async def __asynccontextmanager__(self):
+        self._stats_stream = current_stats_stream.get()
+
         remote_send_orders, local_receive_orders = create_memory_object_stream[StatsIntent](max_buffer_size=0)
         local_send_stats, remote_receive_stats = create_memory_object_stream[StatsPerStream](max_buffer_size=0)
 
         async def process():
             async with (
-                create_task_group() as self._task_group,
                 local_receive_orders,
                 local_send_stats
             ):

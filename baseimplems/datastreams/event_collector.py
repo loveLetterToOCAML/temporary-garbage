@@ -78,21 +78,16 @@ class EventCollector(AsyncContextManagerMixin):
         self._send_event, self._on_receive = create_memory_object_stream[StreamEvent](max_buffer_size=max_buffer_capacity)
 
     async def _consumer(self):
+        # todo: try catch in case of bad handler, + management of _handlers_ok
         async with self._on_receive:
             async for data in self._on_receive:
                 for sync_handler in self._sync_handlers:
                     if self._handlers_ok[(sync_handler, True)]:
-                        try:
-                            sync_handler(data)
-                        except Exception as e:
-                            self._handlers_ok[(sync_handler, True)] = False
+                        sync_handler(data)
                 for async_handler in self._async_handlers:
                     async with self._limiter:
                         if self._handlers_ok[(async_handler, False)]:
-                            try:
-                                await async_handler(data)
-                            except Exception as e:
-                                self._handlers_ok[(async_handler, False)] = False
+                            await async_handler(data)
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
@@ -124,7 +119,7 @@ async def default_prepare_event_handlers_context():
         print_with_threshold as send_to_print_with_threshold,
         send_to_print_with_threshold
     ):
-        yield {'async_handlers': [current_stats_stream.get, send_to_print_with_threshold.send]}
+        yield {'async_handlers': [current_stats_stream.get(), send_to_print_with_threshold.send]}
 
 stream_event_collector = ContextVar[EventCollector]('stream_events')
 run_with_event_collector = run_within(
@@ -136,7 +131,6 @@ run_with_event_collector = run_within(
     upper_context_dependency=default_prepare_event_handlers_context
 )
 current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_event_stream')
-
 
 
 @asynccontextmanager

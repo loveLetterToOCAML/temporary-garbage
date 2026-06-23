@@ -11,8 +11,7 @@ from anyio import AsyncContextManagerMixin, create_task_group, create_memory_obj
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncGenerator, Self
-
+from typing import AsyncGenerator, Self, AsyncIterator
 
 # these are to move upper, at interaction layer so that these are globally defined after interaction between 2 parts
 content_transfer_timed_constraints = ContextVar[TimedGlobalChunksConstraint]('global_chunk_constraints')
@@ -39,7 +38,7 @@ class ChunkedBytes(AsyncContextManagerMixin):
         self._memory_constraints = memory_constraints
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self):
+    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[bytes]]:
         _internal_producer, chunks_stream = create_memory_object_stream[bytes]()  # for releasing the internal semaphore on consumption
         chunks_send, _internal_consumer = create_memory_object_stream[bytes](
             max_buffer_size=self._memory_constraints.numberOfChunks

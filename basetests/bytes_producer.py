@@ -2,6 +2,8 @@ from baseimplems.datastreams.event_collector import next_stream_event_collector,
     stream_event_collector, run_with_event_collector
 from baseimplems.datastreams.stream_event import TransitStatus
 
+from anyio import run, sleep, create_memory_object_stream, create_task_group, move_on_after, Event
+
 from contextlib import asynccontextmanager
 from functools import wraps
 from random import randint
@@ -75,20 +77,19 @@ async def randomly_sleep(gen, proba_sleep=10, sleep_delay=1):
 
 
 @asynccontextmanager
-async def bytes_generator_to_stream(gen, max_buffer_size=0x1000):
+async def bytes_generator_to_stream(gen, *args, max_buffer_size=0x1000):
     local_send_stream, remote_receive_stream = create_memory_object_stream[bytes](max_buffer_size=max_buffer_size)
     async with create_task_group() as tg:
         async def producer():
             async with local_send_stream:
-                async for data in gen():
+                async for data in gen(*args):
                     await local_send_stream.send(data)
         tg.start_soon(producer)
         yield remote_receive_stream
 
 
 if __name__ == '__main__':
-    from baseimplems.datastreams.event_processing import current_stats_stream, StatsIntent
-    from anyio import run, sleep, create_memory_object_stream, create_task_group, move_on_after
+    from baseimplems.datastreams.event_processing import StatsIntent, StatsForStreamProcessing
     from hashlib import sha256, sha512
 
     async def per_f(f, *args):
@@ -100,7 +101,7 @@ if __name__ == '__main__':
         print("sha256", h1.hexdigest())
         print("sha512", h2.hexdigest())
 
-    async def regularly_ask_stats(send_intent, receive_stats):
+    async def regularly_ask_stats(send_intent, receive_stats, until_event: Event):
         async with (
             send_intent,
             receive_stats,
@@ -109,6 +110,9 @@ if __name__ == '__main__':
                 with move_on_after(0.3) as _:
                     async for data in receive_stats:
                         print("DATA", data)
+                if until_event.is_set():
+                    print("Finished from above")
+                    return
                 await send_intent.send(StatsIntent(intentType=randint(0, 15)))
 
     async def main():
@@ -116,10 +120,17 @@ if __name__ == '__main__':
             run_with_event_collector(),
             stream_event_collector.get(),
             create_task_group() as tg,
-            current_stats_stream.get() as (send_intent, receive_stats)
+            StatsForStreamProcessing() as (send_intent, receive_stats),
         ):
-            tg.start_soon(per_f, produce_test_data, StreamType.RANDOM)
-            tg.start_soon(per_f, produce_test_data, StreamType.FIXED)
-            tg.start_soon(regularly_ask_stats, send_intent, receive_stats)
+            event = Event()
+
+            async def both_done():
+                async with create_task_group() as tg2:
+                    tg2.start_soon(per_f, produce_test_data, StreamType.RANDOM)
+                    tg2.start_soon(per_f, produce_test_data, StreamType.FIXED)
+                event.set()  # fires exactly when both are done
+
+            tg.start_soon(both_done)
+            tg.start_soon(regularly_ask_stats, send_intent, receive_stats, event)
 
     run(main)

@@ -1,5 +1,3 @@
-from typing import Literal
-
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root_params import RootSerial
 from baseimplems.date_utils import utc_now
@@ -7,6 +5,7 @@ from baseimplems.date_utils import utc_now
 from pydantic import BaseModel
 
 from datetime import datetime, timedelta
+from typing import Literal
 from enum import Enum
 
 
