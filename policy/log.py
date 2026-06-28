@@ -1,3 +1,4 @@
+from baseimplems.anyio_utils import run_within, run_within_sync
 from utils.enum_name_serializer import SerializableEnum
 from policy.context_utils import run_with_policy
 
@@ -64,13 +65,24 @@ class WithLogPolicy(BaseModel):
 
 
 current_log_policy: ContextVar[LogPolicy] = ContextVar('log_policy')
-run_with_log_policy = run_with_policy(LogPolicy, current_log_policy)
+run_with_log_policy = run_within(LogPolicy, current_log_policy)
+run_with_log_policy_sync = run_within_sync(LogPolicy, current_log_policy)
 
 
 if __name__ == '__main__':
     lp = LogPolicy(
-        logLevel=LogLevel(4),
+        logLevel=LogLevel(10),
         stdoutLogSink=LogSink(logSinkType=LogSinkType.STDERR),
         stderrLogSink=LogSink(logSinkType='STDERR')
     )
     print(lp)
+
+    async def test():
+        async with run_with_log_policy(
+                logLevel=LogLevel(20),
+                stdoutLogSink=LogSink(logSinkType=LogSinkType.STDERR),
+                stderrLogSink=LogSink(logSinkType='STDERR')
+        ) as dyn_lp:
+            print(dyn_lp)
+    import anyio
+    anyio.run(test)

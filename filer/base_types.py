@@ -20,6 +20,25 @@ class PerUlid(BaseModel):
     ulid: DefaultBaseType.ULID
 
 
+class CommonFilerIntentType(Enum):
+    GetContent = 1
+    GetContentSize = 2
+    GetContentUlidForHash = 3
+    GetContentHashForUlid = 4
+    CheckContentForHashAndUlid = 5
+
+    DeleteContent = 20
+    UploadContent = 21
+    UploadContentChunk = 22
+    UploadReady = 23
+    UploadProgress = 24
+
+    CheckIntegrity = 30
+    CheckBackend = 31
+
+    UploadFinished = 31
+
+
 
 from pydantic import BaseModel
 from typing import List
@@ -39,13 +58,13 @@ class File(BaseModel):
 
 
 class UploadContentIntent(BaseModel):
-    kind: Literal[FilerBackendIntentType.UploadContent] = FilerBackendIntentType.UploadContent
+    kind: Literal[CommonFilerIntentType.UploadContent] = CommonFilerIntentType.UploadContent
     totalSize: int
     dataHash: bytes
     requestedChunkSize: int
 
 class UploadReadyToStart(BaseModel):
-    kind: Literal[FilerBackendIntentType.UploadReady] = FilerBackendIntentType.UploadReady
+    kind: Literal[CommonFilerIntentType.UploadReady] = CommonFilerIntentType.UploadReady
     uploadTicket: bytes
     chunkSize: int
     expectedSize: int
@@ -53,17 +72,17 @@ class UploadReadyToStart(BaseModel):
 
 
 class UploadFinished(BaseModel):
-    kind: Literal[FilerBackendIntentType.UploadFinished] = FilerBackendIntentType.UploadFinished
+    kind: Literal[CommonFilerIntentType.UploadFinished] = CommonFilerIntentType.UploadFinished
     ulidUploaded: DefaultBaseType.ULID
     hashUploaded: bytes
     totalSizeUploaded: int
 
-class UploadChunk(BaseModel):
-    kind: Literal[FilerBackendIntentType.UploadContentChunk] = FilerBackendIntentType.UploadContentChunk
+class UploadChunkIntent(BaseModel):
+    kind: Literal[CommonFilerIntentType.UploadContentChunk] = CommonFilerIntentType.UploadContentChunk
     uploadTicket: bytes
     data: bytes
 
-class UploadProgress(BaseModel):
+class UploadProgressIntent(BaseModel):
     uploadTicket: bytes
     precise: bool = False
 
@@ -78,25 +97,24 @@ class UploadProgressResult(BaseModel):
     remainingTimeToUpload: float
 
 
-
 class GetContentIntent(BaseModel):
-    kind: Literal[FilerBackendIntentType.GetContent] = FilerBackendIntentType.GetContent
+    kind: Literal[CommonFilerIntentType.GetContent] = CommonFilerIntentType.GetContent
     intent: PerHash | PerUlid
 
 class GetContentSizeIntent(BaseModel):
-    kind: Literal[FilerBackendIntentType.GetContentSize] = FilerBackendIntentType.GetContentSize
+    kind: Literal[CommonFilerIntentType.GetContentSize] = CommonFilerIntentType.GetContentSize
     intent: PerHash | PerUlid
 
 class GetContentUlidForHashIntent(PerHash):
-    kind: Literal[FilerBackendIntentType.GetContentUlidForHash] = FilerBackendIntentType.GetContentUlidForHash
+    kind: Literal[CommonFilerIntentType.GetContentUlidForHash] = CommonFilerIntentType.GetContentUlidForHash
 
 class GetContentHashForUlidIntent(PerUlid):
-    kind: Literal[FilerBackendIntentType.GetContentHashForUlid] = FilerBackendIntentType.GetContentHashForUlid
+    kind: Literal[CommonFilerIntentType.GetContentHashForUlid] = CommonFilerIntentType.GetContentHashForUlid
 
 class CheckContentForHashAndUlidIntent(BaseModel):
-    kind: Literal[FilerBackendIntentType.CheckContentForHashAndUlid] = FilerBackendIntentType.CheckContentForHashAndUlid
+    kind: Literal[CommonFilerIntentType.CheckContentForHashAndUlid] = CommonFilerIntentType.CheckContentForHashAndUlid
     hash: bytes
-    ulid: ULID
+    ulid: DefaultBaseType.ULID
 
 
 class DeleteContentForHashIntent(PerHash):
@@ -106,5 +124,5 @@ class DeleteContentForUlidIntent(PerUlid):
     confirmDeletionKey: bytes | None = None
 
 class DeleteContentIntent(BaseModel):
-    kind: Literal[FilerBackendIntentType.DeleteContent] = FilerBackendIntentType.DeleteContent
+    kind: Literal[CommonFilerIntentType.DeleteContent] = CommonFilerIntentType.DeleteContent
     intent: DeleteContentForHashIntent | DeleteContentForUlidIntent

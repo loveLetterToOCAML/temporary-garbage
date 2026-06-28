@@ -1,17 +1,18 @@
 # Default pure python async implem of chunks send / recv strongly constrained by time
-from anyio.abc import ObjectReceiveStream
-from anyio.streams.memory import MemoryObjectReceiveStream
-from pydantic import BaseModel
-
 from basetypes.implementation.dataformat.chunk import ContentTransferParameters, ContentTransferState, \
     TimedGlobalChunksConstraint, DataChunk
+from basetypes.implementation.dataformat.compression_protocols import CommonDataBufferSyncProcessing
 
 from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream, Semaphore, move_on_after, \
-    EndOfStream
+    EndOfStream, to_thread, Event
+from anyio.streams.memory import MemoryObjectReceiveStream
+from anyio.abc import ObjectReceiveStream
+from pydantic import BaseModel
 
 from contextlib import asynccontextmanager
+from typing import AsyncIterator, Callable
 from contextvars import ContextVar
-from typing import AsyncGenerator, Self, AsyncIterator
+
 
 # these are to move upper, at interaction layer so that these are globally defined after interaction between 2 parts
 content_transfer_timed_constraints = ContextVar[TimedGlobalChunksConstraint]('global_chunk_constraints')
@@ -21,32 +22,40 @@ content_transfer_parameters = ContextVar[ContentTransferParameters]('transfer_pa
 
 # 16 Mb memory usage by default
 class ChunkInMemoryConstraint(BaseModel):
-    chunkSize: int = 0x10000
+    chunkSize: int = 0x1000000
     numberOfChunks: int = 0x100
-    timeBeforeFlush: float = 0.1
+    timeBeforeFlush: float = 0.03
+
+
+default_local_chunk_constraint = ChunkInMemoryConstraint()
+default_remote_chunk_constraint = ChunkInMemoryConstraint(
+    chunkSize = 0x10000,
+    numberOfChunks = 0x1000,
+    timeBeforeFlush = 0.1
+)
 
 
 class ChunkedBytes(AsyncContextManagerMixin):
     """ Simple memory caching to craft chunks from raw bytes
     """
 
-    # we choose MemoryObjectReceiveStream and not simpler one because of the context management
+    # we choose ObjectReceiveStream and not simpler one because of the context management
     # also one should ensure the upper_stream cannot send more than too much data
     def __init__(self, upper_stream: ObjectReceiveStream[bytes],
-                 memory_constraints: ChunkInMemoryConstraint = ChunkInMemoryConstraint()):
+                 memory_constraints: ChunkInMemoryConstraint = default_local_chunk_constraint):
         self._upper_stream = upper_stream
         self._memory_constraints = memory_constraints
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[bytes]]:
-        _internal_producer, chunks_stream = create_memory_object_stream[bytes]()  # for releasing the internal semaphore on consumption
+    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[DataChunk]]:
+        _internal_producer, chunks_stream = create_memory_object_stream[DataChunk](
+            max_buffer_size=self._memory_constraints.numberOfChunks
+        )  # for releasing the internal semaphore on consumption
         chunks_send, _internal_consumer = create_memory_object_stream[bytes](
             max_buffer_size=self._memory_constraints.numberOfChunks
         )
-        sem = Semaphore(self._memory_constraints.numberOfChunks)
 
         async def send_current(buf):
-            await sem.acquire()
             await chunks_send.send(bytes(buf))
 
         async def producer():
@@ -67,30 +76,148 @@ class ChunkedBytes(AsyncContextManagerMixin):
                     if raw:
                         buf += raw
                     while len(buf) >= self._memory_constraints.chunkSize:
-                        print("buf is full", len(buf))
                         await send_current(buf[:self._memory_constraints.chunkSize])
                         buf = buf[self._memory_constraints.chunkSize:]
 
                     if data_or_flush.cancelled_caught and buf:
-                        print("delay elapsed, sending remaning buf", len(buf))
                         await send_current(buf)
                         buf = bytearray()
 
                 if buf:
                     await send_current(buf)
-            print("LEAVING SEND")
-
 
         async def consumer():
             async with _internal_consumer, _internal_producer:
                 async for chunk in _internal_consumer:
-                    sem.release()
                     await _internal_producer.send(chunk)
 
         async with create_task_group() as tg:
             tg.start_soon(producer)
             tg.start_soon(consumer)
             yield chunks_stream
+
+
+
+class ChunkedBytesToChunkObjects(AsyncContextManagerMixin):
+
+    def __init__(self, upper_stream: ObjectReceiveStream[bytes], chunks_in_mem: int):
+        self._upper_stream = upper_stream
+        self._chunks_in_mem = chunks_in_mem
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[DataChunk]]:
+        _internal_producer, chunks_stream = create_memory_object_stream[DataChunk](
+            max_buffer_size=self._chunks_in_mem
+        )
+
+        async def consumer():
+            index = 0
+            offset = 0
+            async with self._upper_stream, _internal_producer:
+                async for chunk in self._upper_stream:
+                    await _internal_producer.send(
+                        DataChunk(
+                            data=chunk,
+                            index=index,
+                            offset=offset,
+                            integrity=None
+                        )
+                    )
+                    offset += len(chunk)
+                    index += 1
+
+        async with create_task_group() as tg:
+            tg.start_soon(consumer)
+            yield chunks_stream
+
+
+class CommonDataBufferAsyncProcessing(AsyncContextManagerMixin):
+
+    def __init__(self, upper_stream: ObjectReceiveStream[bytes],
+                 sync_processing_callable: Callable[[BaseModel], CommonDataBufferSyncProcessing], arguments: BaseModel, *,
+                 memory_constraints: ChunkInMemoryConstraint | None = None, reset_event: Event | None = None):
+        self._memory_constraints = memory_constraints or ChunkInMemoryConstraint()
+        self._upper_stream = upper_stream
+        self._reset_event = reset_event
+        self._sync_processing_callable = sync_processing_callable
+        self._arguments_construct_sync_process = arguments
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self) -> AsyncIterator[ObjectReceiveStream[bytes]]:
+        compressed_data_send, compressed_data_stream = create_memory_object_stream[bytes](
+            max_buffer_size=self._memory_constraints.chunkSize * 2
+        )
+        async with (
+            ChunkedBytes(compressed_data_stream, self._memory_constraints) as chunk_stream,
+            anyio.create_task_group() as tg
+        ):
+            processed_data = bytearray()
+            limiter = anyio.CapacityLimiter(1)
+
+            async def process(processor, chunk: bytes) -> None:
+                nonlocal processed_data
+                processed_data += await to_thread.run_sync(processor, chunk, limiter=limiter)
+
+            async def send_current(data):
+                await compressed_data_send.send(data)
+
+            async def while_no_reset(it):
+                nonlocal processed_data
+
+                processor: CommonDataBufferSyncProcessing = self._sync_processing_callable(self._arguments_construct_sync_process)
+                print(processor)
+                async with processor:
+                    header = await to_thread.run_sync(processor.begin, limiter=limiter) or b''
+                    await send_current(header)
+                    while True:
+                        if self._reset_event and self._reset_event.is_set():
+                            print("Received signal to reset compressor, redoing")
+                            return True
+
+                        raw = b''
+                        with move_on_after(self._memory_constraints.timeBeforeFlush) as data_or_flush:
+                            try:
+                                raw = await it.__anext__()
+                            except StopAsyncIteration:  # async for exhaustion
+                                break
+
+                        if raw:
+                            print("before processor, ", processor,  len(processed_data), len(raw))
+                            await process(processor, raw)
+                            print("after processor, ", processor, len(processed_data))
+                        else:
+                            print("flushing at the end")
+                            processed_data += await to_thread.run_sync(processor.flush, limiter=limiter) or b''
+
+                        while len(processed_data) >= self._memory_constraints.chunkSize:
+                            print("processor buf is full", len(processed_data))
+                            await send_current(processed_data[:self._memory_constraints.chunkSize])
+                            processed_data = processed_data[self._memory_constraints.chunkSize:]
+
+                        if data_or_flush.cancelled_caught and processed_data:
+                            print("sending processor data", processor, len(processed_data))
+                            await send_current(processed_data)
+                            processed_data = bytearray()
+
+                    processed_data += await to_thread.run_sync(processor.end, limiter=limiter) or b''
+                    if processed_data:
+                        print("SEND END", len(processed_data))
+                        await send_current(processed_data)
+
+                    return False
+
+            async def compressor_main():
+                nonlocal processed_data
+                async with (
+                    compressed_data_send,
+                    self._upper_stream as chunks,
+                ):
+                    it = chunks.__aiter__()
+                    while await while_no_reset(it):
+                        pass
+
+            tg.start_soon(compressor_main)
+            yield chunk_stream
 
 
 class ChunkedContentSender(AsyncContextManagerMixin):

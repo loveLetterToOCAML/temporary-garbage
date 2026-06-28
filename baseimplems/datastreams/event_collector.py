@@ -13,10 +13,10 @@ import anyio
 
 from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
 from typing import Type, Callable, Awaitable
+from typing_extensions import AsyncIterator
 from contextvars import ContextVar
 from datetime import timedelta
 from random import randint
-
 
 
 class StreamEventStream:
@@ -134,7 +134,7 @@ current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_even
 
 
 @asynccontextmanager
-async def next_stream_event_collector(f_name, send_start_event: bool = True):
+async def next_stream_event_collector(f_name, send_start_event: bool = True) -> AsyncIterator[StreamEventStream]:
     csec = stream_event_collector.get()
     sec = csec.next_stream_event_collector(f_name)
     prev = current_stream_event_stream.set(sec)
@@ -150,6 +150,7 @@ async def next_stream_event_collector(f_name, send_start_event: bool = True):
         raise
     except Exception as e:
         print("CAUGH2", type(e))
+        raise e
     finally:
         await sec.new_stream_end_event(reason)
         current_stream_event_stream.reset(prev)

@@ -283,8 +283,8 @@ class StatsForStreamProcessing(AsyncContextManagerMixin):
     async def __asynccontextmanager__(self):
         self._stats_stream = current_stats_stream.get()
 
-        remote_send_orders, local_receive_orders = create_memory_object_stream[StatsIntent](max_buffer_size=0)
-        local_send_stats, remote_receive_stats = create_memory_object_stream[StatsPerStream](max_buffer_size=0)
+        remote_send_orders, local_receive_orders = create_memory_object_stream[StatsIntent](max_buffer_size=0x1000)
+        local_send_stats, remote_receive_stats = create_memory_object_stream[StatsPerStream](max_buffer_size=0x1000)
 
         async def process():
             async with (

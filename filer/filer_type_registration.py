@@ -1,7 +1,6 @@
-from basetypes.a_root import Serial
-from basetypes.ae_interaction import Interaction, InteractionType
 from basetypes.bz_execution_system import PersistentDataExecutionSystemType, PersistentData
-from basetypes.a_root_params import RootSerial
+from basetypes.ae_interaction import InteractionType
+from basetypes.a_root import SerialType
 
 from enum import Enum
 
@@ -19,4 +18,5 @@ class FilerType(Enum):
 
 FilerSubsystem = PersistentData.register_serialization_child(PersistentDataExecutionSystemType.Filer, FilerType)
 
-FilerCommon = FilerSubsystem.register_serialization_child(FilerType.RecursiveRoot, RootSerial)
+FilerCommon = FilerSubsystem.register_serialization_child(FilerType.RecursiveRoot, SerialType)
+FilerInteractions = FilerCommon.register_serialization_child(SerialType.Interaction, InteractionType)

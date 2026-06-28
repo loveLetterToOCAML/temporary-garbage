@@ -35,7 +35,7 @@ class SourceCodeLocation(BaseModel):
     exception: ExceptionDetails | DefaultBaseType.TYPE | RootSerial | None = None
 
 
-def _get_stringio_lines(call_with_stringio):
+def _get_stringio_lines(call_with_stringio) -> list[str]:
     lines = []
     class WriteSupport:
         @staticmethod
@@ -46,7 +46,7 @@ def _get_stringio_lines(call_with_stringio):
     return lines
 
 
-ExceptionInfoType = tuple[type[BaseException], BaseException, TracebackType | None]
+ExceptionInfoType = tuple[type[BaseException], BaseException, TracebackType | None]  # same as _SysExcInfoType
 
 def current_exception_info() -> ExceptionInfoType:
     return sys.exc_info()

@@ -36,7 +36,7 @@ class CompressionAlgorithmInstance(BaseModel):
 
 
 class DefaultCompressionParameters(BaseModel):
-    compressionLevel: int
+    compressionLevel: int = 6
     withHistory: bool = False  # take advantages of dynamic window recomputation through time and emitted blocks
     withChecksum: bool = True  # compute checksum of each block for basic verification
 
@@ -133,18 +133,6 @@ class CompressedData(BaseModel):
     compressedBytes: bytes
 
 
-def decompress_data_to_chunks_exn(data: CompressedData):
-    match data.compressionAlgorithm.type:
-        case CompressionAlgorithm.GZIP:
-            yield from gzip_decompress(data.compressionAlgorithm.compressionParameters, data.compressedBytes)
-        case CompressionAlgorithm.ZSTD:
-            pass
-        case CompressionAlgorithm.LZ4:
-            pass
-        case _:
-            raise NotImplementedError
-
-
 def compression_obj_for(instance: CompressionAlgorithmInstance) -> CommonDataBufferSyncProcessing:
     match instance.type:
         case CompressionAlgorithm.GZIP:
@@ -153,7 +141,22 @@ def compression_obj_for(instance: CompressionAlgorithmInstance) -> CommonDataBuf
         case CompressionAlgorithm.ZSTD:
             pass
         case CompressionAlgorithm.LZ4:
+            from basetypes.implementation.dataformat.compression_lz4 import Lz4Compressor
+            return Lz4Compressor(instance.compressionParameters)
+        case _:
+            raise NotImplementedError
+
+
+def decompression_obj_for(instance: CompressionAlgorithmInstance) -> CommonDataBufferSyncProcessing:
+    match instance.type:
+        case CompressionAlgorithm.GZIP:
+            from basetypes.implementation.dataformat.compression_gzip import GzipDecompressor
+            return GzipDecompressor(instance.compressionParameters)
+        case CompressionAlgorithm.ZSTD:
             pass
+        case CompressionAlgorithm.LZ4:
+            from basetypes.implementation.dataformat.compression_lz4 import Lz4Decompressor
+            return Lz4Decompressor(instance.compressionParameters)
         case _:
             raise NotImplementedError
 
@@ -163,10 +166,6 @@ async def async_decompress(instance: CompressionAlgorithmInstance):
     decompressor = compression_obj_for(instance)
     async with decompressor:
         yield decompressor
-
-
-def decompress_data_raw_exn(data: CompressedData):
-    return b''.join(decompress_data_to_chunks_exn(data))
 
 
 class CompressionResult(BaseModel):

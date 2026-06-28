@@ -1,3 +1,4 @@
+from basetypes.ae_interaction import Interaction, InteractionType
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from basetypes.a_root import SerializationNode, SerialType, Root
 from basetypes.ab_basetypes import attempt_serial_type
@@ -31,7 +32,7 @@ class CommonException(SerializationNode):
 ### END AUTO GENERATION
 
 
-CommonExceptions: CommonException = Root.register_serialization_child(SerialType.ExecutionSystem, CommonExceptionType, CommonException)
+CommonExceptions: CommonException = Interaction.register_serialization_child(InteractionType.Exception, CommonExceptionType)
 
 
 class HumanReadableExceptionModel(BaseModel):
@@ -43,6 +44,7 @@ class ExpectedTypeExceptionModel(BaseModel):
     expected: DefaultBaseType.TYPE | str
 
 
+CommonExceptions.register_serialization_leaf(CommonExceptionType.GenericException, HumanReadableExceptionModel)
 CommonExceptions.register_serialization_leaf(CommonExceptionType.ExpectedType, ExpectedTypeExceptionModel)
 SerialHumanReadableException: HumanReadableExceptionModel = CommonExceptions.leaf_object_constructor(CommonExceptionType.GenericException)
 SerialExpectedTypeException: ExpectedTypeExceptionModel = CommonExceptions.leaf_object_constructor(CommonExceptionType.ExpectedType)

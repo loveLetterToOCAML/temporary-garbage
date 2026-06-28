@@ -35,6 +35,7 @@ async def stream_event_consumer_max_events(consumer_function: Callable[[StreamEv
             sliding_window = {}
             cursor = {}
             print_at = {}
+
             async with local_receive_stream:
                 it = local_receive_stream.__aiter__()
                 while True:

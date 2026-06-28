@@ -1,6 +1,6 @@
+from baseimplems.anyio_utils import register_manager_on_context_update_sync
 from policy.log import LogPolicy, PythonLoggingApi, current_log_policy
 from log.logging_wrapping_logger import PythonLoggingWrappingLogger
-from policy.context_utils import register_manager_on_context_update
 from utils.custom_context_var import ContextVarWrapper
 from context.init import InitContextVarException
 from log.logger_api import LoggerApi
@@ -14,8 +14,8 @@ import contextlib
 #LogApiDispatcher = ProxyToApi(LoggerApi)
 
 # TODO: proper handling of 2 classes of object: good ones (which implement proper context handling in contextvars) and
-# "bad" ones (which does not implement this, and have some reset state to revert, meaning a "foreground" function which)
-# aims at ensuring turning back to original state when exiting the context manager
+# "bad" ones (which does not implement this, and have some reset state to revert, meaning a "foreground" function which
+# aims at ensuring turning back to original state when exiting the context manager)
 
 class LogApiDispatcher(LoggerApi):
 
@@ -28,23 +28,8 @@ class LogApiDispatcher(LoggerApi):
         else:
             self._current_logger: ContextVarWrapper[LoggerApi] = ContextVarWrapper(f"logger[{name}]")
 
-    def debug(self, msg, *args, **kwargs):
-        return self._current_logger.debug(msg, *args, **kwargs)
-
-    def info(self, msg, *args, **kwargs):
-        return self._current_logger.info(msg, *args, **kwargs)
-
-    def warning(self, msg, *args, **kwargs):
-        return self._current_logger.warning(msg, *args, **kwargs)
-
-    def error(self, msg, *args, **kwargs):
-        return self._current_logger.error(msg, *args, **kwargs)
-
-    def exception(self, msg, *args, exc_info=True, **kwargs):
-        return self._current_logger.exception(msg, *args, exc_info=exc_info, **kwargs)
-
-    def critical(self, msg, *args, **kwargs):
-        return self._current_logger.critical(msg, *args, **kwargs)
+    def log(self, *args, **kwargs):
+        return self._current_logger.log(*args, **kwargs)
 
     @contextlib.contextmanager
     def reset_log_policy(self, log_policy: LogPolicy):
@@ -71,7 +56,7 @@ def _reset_log_policy(log_policy: LogPolicy):
         yield
 
 
-register_manager_on_context_update(current_log_policy, _reset_log_policy)
+register_manager_on_context_update_sync(current_log_policy, _reset_log_policy)
 
 
 def logger_for(logger_name):
@@ -102,24 +87,24 @@ def logger_for(logger_name):
 
 if __name__ == '__main__':
     from policy.log import LogLevel, StdoutSink, StderrSink
-    from policy.log import run_with_log_policy
+    from policy.log import run_with_log_policy_sync
 
     from threading import Thread
     import time
 
     def run1():
-        with run_with_log_policy():
+        with run_with_log_policy_sync():
             lgr = logger_for(__name__)
             lgr.info("OK 1")
             time.sleep(1)
-            with run_with_log_policy(logLevel=LogLevel.ERROR):
+            with run_with_log_policy_sync(logLevel=LogLevel.ERROR):
                 lgr.error("starting")
                 time.sleep(2)
                 lgr.error("ending")
             lgr.info("end")
 
     def run2():
-        with run_with_log_policy():
+        with run_with_log_policy_sync():
             lgr = logger_for(__name__)
             lgr.info("OK 2")
             time.sleep(2)
@@ -136,21 +121,28 @@ if __name__ == '__main__':
     t1.join()
     t2.join()
 
-    with run_with_log_policy():
+    with run_with_log_policy_sync():
         lgr = logger_for(__name__)
         lgr.info('test')
         lgr.error('test')
 
-        with run_with_log_policy(logLevel=LogLevel.ERROR):
+        with run_with_log_policy_sync(logLevel=LogLevel.ERROR):
             lgr.info('test2')
             lgr.error('test2')
 
         lgr.info('test3')
         lgr.warning('test3')
 
-        with run_with_log_policy(logLevel=LogLevel.WARNING, stdoutLogSink=StderrSink(), stderrLogSink=StdoutSink()):
+        with run_with_log_policy_sync(logLevel=LogLevel.WARNING, stdoutLogSink=StderrSink(), stderrLogSink=StdoutSink()):
             lgr.warning('test4')
             lgr.error('test4')
+
+            try:
+                raise Exception("whatever")
+            except Exception as _:
+                lgr.exception('this is exc')
+
+            lgr.warning('then it goes')
 
 
 # stderr

@@ -12,10 +12,14 @@ from __future__ import annotations
 import gzip
 import time
 import zlib
+from contextlib import asynccontextmanager
+
+from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel, Field
 
-from basetypes.implementation.dataformat.compression import CompressionResult
-from basetypes.implementation.dataformat.compression_protocols import StreamCompressorProtocol
+from baseimplems.anyio_utils import NotInAsyncContextManager
+from basetypes.implementation.dataformat.compression_protocols import StreamCompressorProtocol, \
+    StreamDecompressorProtocol
 
 
 class InternalGzipCompressionParameters(BaseModel):
@@ -43,91 +47,70 @@ class InternalGzipCompressionParameters(BaseModel):
     )
 
 
-
-class GzipCompressor(StreamCompressorProtocol):
-    """Gzip compressor — balanced speed / ratio using Python stdlib."""
+class Gzip(AsyncContextManagerMixin):
+    """Gzip compressor / decompressor — balanced speed / ratio using Python stdlib."""
 
     def __init__(self, params):
-        self.params = params
+        self._compress_obj = self._decompress_obj = None
+        self._params = params
+        self._wbits = -15
 
-    def compress(self, data: bytes) -> bytes:
-        obj = zlib.compressobj(
-            self.params.compressionLevel,
+    @asynccontextmanager
+    async def __asynccontextmanager__(self):
+        self._compress_obj = zlib.compressobj(
+            self._params.compressionLevel,
             zlib.DEFLATED,
-            -15,
+            self._wbits,
             8,
             0,
         )
-        t0 = time.perf_counter()
-        compressed = obj.compress(data) + obj.flush()
-        elapsed = (time.perf_counter() - t0) * 1000
-        return compressed
-
-    def decompress(self, data: bytes) -> tuple[bytes, float]:
-        t0 = time.perf_counter()
-        result = zlib.decompress(data, self.params.wbits)
-        elapsed = (time.perf_counter() - t0) * 1000
-        return result, elapsed
-
-    def run(self, data: bytes) -> CompressionResult:
-        compressed, c_ms = self.compress(data)
-        decompressed, d_ms = self.decompress(compressed)
-        orig = len(data)
-        comp = len(compressed)
-        return CompressionResult(
-            algorithm=f"gzip (level={self.params.compresslevel})",
-            original_size=orig,
-            compressed_size=comp,
-            compression_ratio=round(orig / comp, 4) if comp else float("inf"),
-            space_saving_pct=round((1 - comp / orig) * 100, 2) if orig else 0.0,
-            compress_time_ms=round(c_ms, 4),
-            decompress_time_ms=round(d_ms, 4),
-            lossless_verified=decompressed == data,
+        self._decompress_obj = zlib.decompressobj(
+            self._wbits,
         )
+        yield self
+
+    def compress(self, data: bytes) -> bytes:
+        if not self._compress_obj:
+            raise NotInAsyncContextManager('compress', 'Gzip')
+        return self._compress_obj.compress(data)
+
+    def compress_and_flush(self, data: bytes = b'') -> bytes:
+        return self.compress(data) + self._compress_obj.flush()
+
+    def decompress(self, data: bytes) -> bytes:
+        if not self._decompress_obj:
+            raise NotInAsyncContextManager('decompress', 'Gzip')
+        return self._decompress_obj.decompress(data)
+
+    def decompress_and_flush(self, data: bytes = b'') -> bytes:
+        return self.decompress(data) + self._decompress_obj.flush()
 
 
+class GzipCompressor(Gzip, StreamCompressorProtocol):
+    end = Gzip.compress_and_flush
 
-# ---------------------------------------------------------------------------
-# Demo
-# ---------------------------------------------------------------------------
+class GzipDecompressor(Gzip, StreamDecompressorProtocol):
+    end = Gzip.decompress_and_flush
 
-if __name__ == "__main__":
-    import json, textwrap
 
-    # Generate a compressible payload (~200 KB of repetitive JSON-like text)
-    payload = (
-        '{"id": %d, "name": "sample record", "value": 3.14159, '
-        '"active": true, "tags": ["foo", "bar", "baz"]}\n'
-    ) * 3_000
-    data = payload.encode()
+if __name__ == '__main__':
+    from basetypes.implementation.dataformat.compression import DefaultCompressionParameters
+    import anyio
 
-    print(f"Payload size: {len(data):,} bytes\n{'─'*65}")
+    async def perform():
+        g = GzipCompressor(DefaultCompressionParameters())
+        async with g:
+            d1 = g.compress(b'andiaolzopammalp')
+            print(d1)
+            d2 = g.compress_and_flush(b'pppalsmla')
+            print(d2)
+            print(d1+d2)
 
-    compressors = [
-        GzipCompressor(params=GzipParams(compresslevel=6)),
-        LZ4Compressor(params=LZ4Params(mode=LZ4Mode.FRAME, compression_level=0)),
-        ZstdCompressor(params=ZstdParams(level=19)),
-    ]
+        g = GzipDecompressor(DefaultCompressionParameters())
+        async with g:
+            d1 = g.decompress(d2[:0x8])
+            print(d1)
+            d2 = g.decompress_and_flush(d2[0x8:])
+            print(d2)
 
-    results: list[CompressionResult] = []
-    for c in compressors:
-        r = c.run(data)
-        results.append(r)
-        print(r)
-
-    # Pydantic serialisation demo
-    print(f"\n{'─'*65}")
-    print("JSON serialisation of the first result (GzipCompressor):\n")
-    print(textwrap.indent(results[0].model_dump_json(indent=2), "  "))
-
-    print(f"\n{'─'*65}")
-    print("JSON serialisation of GzipParams:\n")
-    gzip_params = GzipParams(compresslevel=9)
-    print(textwrap.indent(gzip_params.model_dump_json(indent=2), "  "))
-
-    print(f"\n{'─'*65}")
-    print("Deserialise ZstdParams from dict:\n")
-    raw = {"level": 15, "threads": 2, "write_checksum": False,
-           "strategy": ZstdStrategy.BTULTRA2}
-    zp = ZstdParams(**raw)
-    print(textwrap.indent(zp.model_dump_json(indent=2), "  "))
+    anyio.run(perform)

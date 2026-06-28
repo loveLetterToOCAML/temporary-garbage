@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from config.config_api import StructuredConfigApi
 from config.config_from_enum import default_config_for_enum
+from config.config_api import StructuredConfigApi
 
 from pydantic import BaseModel
 

@@ -1,4 +1,3 @@
-from config.root_config import RootConfigContext
 from basetypes.a_root import SerialType, SerializationNode, Root
 
 from enum import Enum

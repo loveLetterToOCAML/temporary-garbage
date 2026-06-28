@@ -1,8 +1,10 @@
-from policy.log import LogPolicy, LogSink, StderrSink, StdoutSink, PythonLoggingFormatting, LogApiType
+from log.source_location import current_exception_info
+from policy.log import LogPolicy, LogSink, StderrSink, StdoutSink, PythonLoggingFormatting, LogApiType, LogLevel
 from log.logger_api import LoggerApi
 
 from threading import Lock, currentThread
 from functools import wraps
+from typing import Type
 import logging
 import sys
 
@@ -91,28 +93,16 @@ class PythonLoggingWrappingLogger(LoggerApi):
         self._stderr_logger.addHandler(self._stderr_h)
 
     @under_lock_call
-    def debug(self, msg, *args, **kwargs):
-        self._stdout_logger.debug(msg, *args, **kwargs)
-
-    @under_lock_call
-    def info(self, msg, *args, **kwargs):
-        self._stdout_logger.info(msg, *args, **kwargs)
-
-    @under_lock_call
-    def warning(self, msg, *args, **kwargs):
-        self._stdout_logger.warning(msg, *args, **kwargs)
-
-    @under_lock_call
-    def error(self, msg, *args, **kwargs):
-        self._stderr_logger.error(msg, *args, **kwargs)
-
-    @under_lock_call
-    def exception(self, msg, *args, exc_info=True, **kwargs):
-        self._stderr_logger.error(msg, *args, exc_info=exc_info, **kwargs)
-
-    @under_lock_call
-    def critical(self, msg, *args, **kwargs):
-        self._stderr_logger.critical(msg, *args, **kwargs)
+    # TODO: handle LogRecordType
+    def log(self, log_level: LogLevel, message: str | None = None, LogRecordType: Type | None = None, *,
+            with_exc_info: bool = False, **additional_parameters):
+        exc_info = {}
+        if with_exc_info:
+            exc_info.update({'exc_info': current_exception_info()})
+        if log_level in (LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARNING):
+            self._stdout_logger.log(log_level.value, message, **exc_info, **additional_parameters)
+        else:
+            self._stderr_logger.log(log_level.value, message, **exc_info, **additional_parameters)
 
     def __repr__(self):
         return '<%s %s (%s)> + <%s %s (%s)>' % (

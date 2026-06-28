@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import Protocol, final
 
 
@@ -13,6 +14,10 @@ class CommonDataBufferSyncProcessing(Protocol):
         ...
 
     def end(self) -> bytes:
+        ...
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self):
         ...
 
 

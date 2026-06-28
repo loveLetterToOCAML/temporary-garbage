@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 
 from basetypes.ab_basetypes import BaseTypes
+from basetypes.implementation.generics_match import Tree
 
 
 class FromNodeModel(BaseModel):

@@ -62,4 +62,5 @@ class ContentTransferParameters(StreamingTransferParameters):
 class DataChunk(BaseModel):
     index: int
     data: bytes
+    offset: int
     integrity: bytes | None

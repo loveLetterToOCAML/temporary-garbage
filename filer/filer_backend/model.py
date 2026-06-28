@@ -23,7 +23,7 @@ class DefineFromRoot(BaseModel):
 class DefineFromContext(BaseModel):
     rootSuffix: str = '.filer'
 
-class DefineFromContextOrRoot(BaseModel):  # if no context is provided,
+class DefineFromContextOrRoot(BaseModel):  # if no context is provided, will take from root
     rootSuffix: str = '.filer'
 
 class DefineFromAbs(BaseModel):
@@ -56,5 +56,4 @@ class SQLFiler(BaseModel):
 
 class InMemoryFiler(BaseModel):
     kind: Literal[FilerBackendType.InMemory] = FilerBackendType.InMemory
-    cacheDirectorySuffix: str = '.filercache'
-    maxDataSizeInMemory: int = 0x1000000
+    maxDataSizeInMemory: int = 0x40000000

@@ -1,3 +1,5 @@
+import os.path
+
 from baseimplems.datastreams.event_collector import next_stream_event_collector, current_stream_event_stream, \
     stream_event_collector, run_with_event_collector
 from baseimplems.datastreams.stream_event import TransitStatus
@@ -23,7 +25,7 @@ def within_new_bytes_event_stream(f):
 
 
 @within_new_bytes_event_stream
-async def create_random_stream(data_size=1000000000, max_bound=0x1000):
+async def create_random_stream(data_size=1000000000, max_bound=0x100000):
     ctr = 0
     while ctr < data_size:
         sz = randint(1, max_bound)
@@ -33,30 +35,39 @@ async def create_random_stream(data_size=1000000000, max_bound=0x1000):
         yield to_yield
 
 
-@within_new_bytes_event_stream
-async def create_big_fixed_stream(data_size=1000000000, fixed_n=3, send_by_chunks_of=0x400):
-    ctr = 0
-    cur = 0
-    data = b''
-    while ctr < data_size:
-        data += bytes([cur, (cur+1)%0x100, (cur*2)%0x100] * fixed_n)
-        cur = (cur*cur*cur + cur*3 + 3 + cur*cur*7) % 0x100
-        ctr += fixed_n * 3
-        if ctr >= data_size:
-            data = data[:len(data) - ctr + data_size]
-            yield data
-            return
+cache = 'C:\\Windows\\Temp\\rand'
 
-        while len(data) > send_by_chunks_of:
-            yield data[:send_by_chunks_of]
-            data = data[send_by_chunks_of:]
+@within_new_bytes_event_stream
+async def create_big_fixed_stream(data_size=1000000000, fixed_n=0xfff, send_by_chunks_of=0x1000000):
+    if not os.path.isfile(cache):
+        ctr = 0
+        cur = 0
+        data = b''
+        while ctr < data_size:
+            data += bytes([cur, (cur+1)%0x100, (cur*2)%0x100] * fixed_n)
+            cur = (cur*cur*cur + cur*3 + 3 + cur*cur*7) % 0xff
+            ctr += fixed_n * 3
+
+        with open(cache, 'wb') as f:
+            f.write(data[:data_size])
+
+    with open(cache, 'rb') as f:
+        data = f.read()
+        if len(data) != data_size:
+            raise Exception(f"Expected {cache} -> {data_size} data, got {len(data)}")
+
+        offset = 0
+        while data_size - offset >= send_by_chunks_of:
+            yield data[offset: offset + send_by_chunks_of]
+            offset += send_by_chunks_of
+        yield data[offset:]
 
 
 class StreamType(Enum):
     RANDOM = 1
     FIXED = 2
 
-async def produce_test_data(stream_type: StreamType, data_size=10000000, *args):
+async def produce_test_data(stream_type: StreamType, data_size=1000000000, *args):
     if stream_type is StreamType.RANDOM:
         f = create_random_stream
     elif stream_type is StreamType.FIXED:
