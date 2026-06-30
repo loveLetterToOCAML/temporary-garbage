@@ -83,8 +83,8 @@ class FilerBackendInMem(AsyncContextManagerMixin):
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
-        self._internal_result_stream, external_receive_results = create_memory_object_stream[FilerRegistryResult](0x40)
-        external_send_intent, self._receive_intent = create_memory_object_stream[FilerRegistryIntent](0x40)
+        self._internal_result_stream, external_receive_results = create_memory_object_stream[FilerBackendResult](0x40)
+        external_send_intent, self._receive_intent = create_memory_object_stream[FilerBackendIntent](0x40)
         self._semaphore = Semaphore(0x10)
 
         async with (
