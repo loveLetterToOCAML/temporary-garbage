@@ -65,15 +65,20 @@ def bind_dynamic(context_var: ContextVar | ContextVarWrapper, **kwargs):
         _dynamic_callable_arguments_for_context.get()[context_var] = prev
 
 
-def run_within(ModelType: Type, ctxt: ContextVar | ContextVarWrapper,
+def run_within(ModelType: Type | Callable, ctxt: ContextVar | ContextVarWrapper,
                default_bind_static_arguments: dict[str, Any] = None,
                default_bind_callable_arguments: dict[str, Callable] = None,
                upper_context_dependency: _AsyncGeneratorContextManager[dict[str, Any]] | None = None,
                with_static_bound_arguments: bool = True,
                with_dynamic_bound_arguments: bool = True):
 
+    if hasattr(ModelType, '__call__'):
+        ModelTypeHint = Type
+    else:
+        ModelTypeHint = ModelType
+
     @contextlib.asynccontextmanager
-    async def run_with_ctxt_manager(instance: ModelType | None = None, **kwargs) -> AsyncIterable[ModelType]:
+    async def run_with_ctxt_manager(instance: ModelTypeHint | None = None, **kwargs) -> AsyncIterable[ModelTypeHint]:
         if instance and not isinstance(instance, ModelType):
             raise ExpectedTypeException(got=type(instance), expected=ModelType)
         if instance and kwargs:

@@ -1,6 +1,14 @@
-from typing import Protocol, TypeVar, Generic
+from __future__ import annotations
 
+from baseimplems.anyio_utils import NotInAsyncContextManager
+
+from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
+
+from typing import Protocol, TypeVar, Generic, AsyncIterable
+from contextlib import asynccontextmanager
+from functools import wraps
+
 
 """
 A registry basically implements:
@@ -57,5 +65,58 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType], Proto
     async def delete_item(self, hash: HashType) -> bool | None:  # responsibility remains to the implementer to handle soft-delete
         ...
 
-    async def preload_metadata(self) -> int:  # `init` method, returns the number of metadata loaded
-        ...
+
+def guarded(func):
+    @wraps(func)
+    async def guard(self, *args, **kwargs):
+        if not self._async_context_active:
+            raise NotInAsyncContextManager(func.__name__, 'RegistryInContext')
+        return await func(self, *args, **kwargs)
+    return guard
+
+class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
+
+    def __init__(self, internal_registry):
+        self._internal_registry = internal_registry
+        self._async_context_active = False
+
+    @guarded
+    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
+        return await self._internal_registry.hash_for_ulid(ulid)
+
+    @guarded
+    async def ulid_for_hash(self, hash: HashType) -> UlidType | None:
+        return await self._internal_registry.ulid_for_hash(hash)
+
+    @guarded
+    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:
+        return await self._internal_registry.check_hash_and_ulid(hash, ulid)
+
+    @guarded
+    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
+        return await self._internal_registry.metadata_for_hash(hash)
+
+    @guarded
+    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
+        return await self._internal_registry.new_item(hash, item_metadata)
+
+    @guarded
+    async def delete_item(self, hash: HashType) -> bool | None:
+        return await self._internal_registry.delete_item(hash)
+
+    @guarded
+    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
+        return await self._internal_registry.list_items(request)
+
+    @guarded
+    async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType], request: SimpleListQueryRequest) -> \
+            SimpleListQueryResponse[HashType | UlidType | MetadataType]:
+        return await self._internal_registry.list_items_of_type(item_type, request)
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
+        try:
+            self._async_context_active = True
+            yield self
+        finally:
+            self._async_context_active = False

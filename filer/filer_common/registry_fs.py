@@ -73,6 +73,9 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
             del self._metadata_for_hashes[hash]
             self._deleted[hash] = True
 
+    async def preload_metadata(self) -> int:
+        return 0
+
     async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
         if request.offset < 0 or request.limit <= 0 or request.offset >= len(self._hashes):
             raise IndexError(request.offset)
