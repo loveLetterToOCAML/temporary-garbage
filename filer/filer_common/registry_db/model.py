@@ -1,14 +1,9 @@
-from sqlalchemy.ext.asyncio import AsyncAttrs
+from baseimplems.persistence.model_utils.model_utils_common import WithULID, WithStringHash, SizeAttributes
+from baseimplems.persistence.model_utils.model_utils_time import CreatedAt
 
-from filer.filer_common.registry_db.model_utils_common import WithULID, WithStringHash, SizeAttributes
-from filer.filer_common.registry_db.model_utils_time import CreatedAt
-from filer.filer_common.registry_db.utils import register_type
-
-from sqlalchemy import Column, Integer, ForeignKey, DateTime, Boolean, MetaData, Table, String
-from sqlalchemy.orm import relationship, declared_attr, DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import ForeignKey, MetaData, Table
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql.type_api import TypeEngine
-from ulid import ULID
-
 
 meta = MetaData()
 

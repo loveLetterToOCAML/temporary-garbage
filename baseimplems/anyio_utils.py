@@ -14,6 +14,12 @@ class NotInAsyncContextManager(Exception):
         super().__init__(f"`{method_name}` function of {class_name} intends to be executed within `async with [{class_name}_instance]`")
 
 
+class AsyncContextManagerDependencyNotEntered(Exception):
+
+    def __init__(self, context_var, expected_class, method_name):
+        super().__init__(f"`{method_name}` function intends to be executed with a valid `{context_var}` async entered from [{expected_class} producer instance]`")
+
+
 _reset_wrapping_context_managers = ContextVarWrapper('reset_wrapping_context_managers', default={})
 _reset_wrapping_context_managers_sync = ContextVarWrapper('reset_wrapping_context_managers_sync', default={})
 

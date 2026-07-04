@@ -12,9 +12,15 @@ Simple wrapper on ContextVar that behaves exactly like ContextVar except it avoi
 any field of the contextualized object
 """
 class ContextVarWrapper(Generic[T]):
+    # singleton to avoid 1 different contextvar object per a given name
+    # warning: this induces extra-precaution as contextvars handle unicity nicely, while name-keying introduces copy paste risks
+    # otherwise we don't have the insurance the module imported var will be imported the same and match the exact same object in memory
+    _registry: dict[str, ContextVar] = {}
 
-    def __init__(self, *args, **kwargs):
-        self._ctxt_var: ContextVar[T] = ContextVar[T](*args, **kwargs)
+    def __init__(self, name, *args, **kwargs):
+        if name not in self._registry:
+            self._registry[name] = ContextVar[T](name, *args, **kwargs)
+        self._ctxt_var: ContextVar[T] = self._registry[name]
 
     @property
     def value(self):

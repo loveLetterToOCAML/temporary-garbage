@@ -14,12 +14,12 @@ import os
 sqlalchemy_sqlite_db_path = ContextVar[str]('db_path')
 run_within_sqlite_db_path = run_within(str, sqlalchemy_sqlite_db_path)
 
-db_engine = ContextVarWrapper[AsyncEngine]('sqlalchemy_db_engine')
+sqlalchemy_db_engine = ContextVarWrapper[AsyncEngine]('sqlalchemy_db_engine')
 
 
 run_with_mock_db_engine = run_within(
     create_async_engine,
-    db_engine,
+    sqlalchemy_db_engine,
     default_bind_static_arguments={
         'url': 'sqlite+aiosqlite:///:memory:',
         'echo': True
@@ -28,7 +28,7 @@ run_with_mock_db_engine = run_within(
 
 run_with_persistent_mock_db_engine = run_within(
     create_async_engine,
-    db_engine,
+    sqlalchemy_db_engine,
     default_bind_static_arguments={
         'echo': True
     },
@@ -58,7 +58,7 @@ async def enclose_within_temporary_file_interactive_mock():
 
 run_with_temporarily_persistent_mock_db_engine = run_within(
     create_async_engine,
-    db_engine,
+    sqlalchemy_db_engine,
     default_bind_static_arguments={
         'echo': True,
     },
@@ -68,7 +68,6 @@ run_with_temporarily_persistent_mock_db_engine = run_within(
 
 if __name__ == '__main__':
     from sqlalchemy import text
-
 
     async def main():
         async with (

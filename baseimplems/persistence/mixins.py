@@ -1,31 +1,27 @@
-from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
+from baseimplems.persistence.sqlalchemy_database import current_sqlalchemy_session
+
+from sqlalchemy.orm import RelationshipProperty, DeclarativeBase
 from sqlalchemy.ext.hybrid import HybridExtensionType
-from sqlalchemy.orm import RelationshipProperty
-from sqlalchemy.util import classproperty
-from sqlalchemy import inspect
-
-from functools import reduce
+from sqlalchemy import inspect, select
 
 
-class MergeMapperArgsMeta(DeclarativeMeta):
+class classproperty:
+    def __init__(self, fget):
+        self.fget = fget
 
-    def __new__(mcls, name, bases, dict):
-        def merge(cur_dict, value):
-            cur_dict.update(getattr(value, '__mapper_args__', {}))
-            return cur_dict
-        mapper_args = reduce(merge, bases, {})
-        mapper_args.update(dict.get('__mapper_args__', {}))
-        return DeclarativeMeta.__new__(mcls, name, bases,
-                                       {**dict, '__mapper_args__': mapper_args} if mapper_args else dict)
+    def __get__(self, obj, owner):
+        return self.fget(owner)
 
 
-class AutoTableCreationMeta(MergeMapperArgsMeta):
-    # __init__ is ok in this case since it's only an external action to perform
-    def __init__(cls, name, bases, dict):
-        MergeMapperArgsMeta.__init__(cls, name, bases, dict)
-
-        with get_engine() as engine:
-            cls.metadata.create_all(engine)
+class MergeMapperArgsMixin:
+    def __init_subclass__(cls, **kw):
+        merged = {}
+        for base in cls.__mro__[1:]:
+            merged.update(getattr(base, "__mapper_args__", {}))
+        merged.update(cls.__dict__.get("__mapper_args__", {}))
+        if merged:
+            cls.__mapper_args__ = merged
+        super().__init_subclass__(**kw)
 
 
 # mostly inspired from https://github.com/absent1706/sqlalchemy-mixins/blob/master/sqlalchemy_mixins/inspection.py
@@ -133,36 +129,32 @@ class ReprMixin(IntrospectionMixin):
         return '{'+f"{self.__class__.__tablename__} #{self._id_str}{' '+repr_attrs if repr_attrs else ''}"+'}'
 
 
-def commit_and_rollback_if_exception(session):
+async def commit_and_rollback_if_exception(session):
     try:
-        session.commit()
+        await session.commit()
     except Exception as e:
-        session.rollback()
+        await session.rollback()
         raise e
 
 class SessionMixin:
     __abstract__ = True
 
-    _session = None
-
     @classproperty
     def session(cls):
-        if cls._session is None:
-            cls._session = current_session()
-        return cls._session
+        return current_sqlalchemy_session.get()
 
     @classproperty
-    def query(cls):
-        return cls.session.query(cls)
+    async def query(cls):
+        return await cls.session.execute(select(cls))
 
     @classmethod
-    def query_for(cls, *args, **kwargs):
-        return cls.session.query(cls).filter(*args).filter_by(**kwargs)
+    async def query_for(cls, *args, **kwargs):
+        return await cls.session.execute(select(cls)).filter(*args).filter_by(**kwargs)
 
-    def save(self, commit=True):
-        self.session.add(self)
+    async def save(self, commit=True):
+        await self.session.add(self)
         if commit:
-            commit_and_rollback_if_exception(self.session)
+            await commit_and_rollback_if_exception(self.session)
         return self
 
 
@@ -180,81 +172,82 @@ class RepositoryMixin(SessionMixin):
         return self
 
     @classmethod
-    def create(cls, commit=True, **argv):
-        return cls().fill(**argv).save(commit=commit)
+    async def create(cls, commit=True, **argv):
+        return await cls().fill(**argv).save(commit=commit)
 
-    def update(self, commit=True, **argv):
-        return self.fill(**argv).save(commit=commit)
+    async def update(self, commit=True, **argv):
+        return await self.fill(**argv).save(commit=commit)
 
-    def delete(self, commit=True):
-        self.session.delete(self)
+    async def delete(self, commit=True):
+        await self.session.delete(self)
         if commit:
-            commit_and_rollback_if_exception(self.session)
+            await commit_and_rollback_if_exception(self.session)
 
     @classmethod
-    def delete_many(cls, *ids, commit=True):
+    async def delete_many(cls, *ids, commit=True):
         for pk in ids:
-            obj = cls.find(pk)
+            obj = await cls.find(pk)
             if obj:
-                obj.delete(commit=commit)
+                await obj.delete(commit=commit)
         if not commit:  # otherwise changes are committed
-            cls.session.flush()
+            await cls.session.flush()
 
     @classmethod
-    def all(cls):
-        return cls.query.all()
+    async def all(cls):
+        return (await cls.query).all()
 
     @classmethod
-    def first(cls):
-        return cls.query.first()
+    async def first(cls):
+        return (await cls.query).first()
 
     @classmethod
-    def find(cls, id_):
-        return cls.query.get(id_)
+    async def find(cls, id_):
+        return (await cls.query).get(id_)
 
 
     @classmethod
-    def get_for(cls, **attrs):
-        return cls.query.filter_by(**attrs).one_or_none()
+    async def get_for(cls, **attrs):
+        return (await cls.query.filter_by(**attrs)).one_or_none()
 
     @classmethod
-    def get_create(cls, commit=True, **attrs):
-        existing = cls.get_for(**attrs)
-        return existing if existing else cls.create(commit=commit, **attrs)
+    async def get_create(cls, commit=True, **attrs):
+        existing = await cls.get_for(**attrs)
+        return existing if existing else await cls.create(commit=commit, **attrs)
 
     @classmethod
-    def get_from_instance(cls, instance, commit=True):  # instance must be of cls type (must be introspectable)
+    async def get_from_instance(cls, instance, commit=True):  # instance must be of cls type (must be introspectable)
         attrs = {x: getattr(instance, x, None) for x in instance.columns + instance.relations}
         attrs = {x: attrs[x] for x in attrs if attrs[x]}
         existing = cls.get_for(**attrs)
-        return existing if existing else cls.create(commit=commit, **attrs)
+        return existing if existing else await cls.create(commit=commit, **attrs)
 
     @classmethod
-    def get_from_construct(cls, *args, **argv):
+    async def get_from_construct(cls, *args, **argv):
         # construct the object attributes in case of complex object
-        instance = cls(commit=argv.get('commit', True), *args, **argv)
+        instance = cls(*args, **argv)
         # then retrieve it /create it from database
-        return cls.get_from_instance(instance, commit=argv.get('commit', True))
+        return await cls.get_from_instance(instance, commit=argv.get('commit', True))
 
     @classmethod
-    def filter_by(cls, **attrs):
-        return cls.query.filter_by(**attrs)
+    async def filter_by(cls, **attrs):
+        return await cls.query.filter_by(**attrs)
 
     @classmethod
-    def filter(cls, condition):
-        return cls.query.filter(condition)
+    async def filter(cls, condition):
+        return await cls.query.filter(condition)
 
     @classmethod
-    def all_for(cls, **attrs):
-        return cls.filter_by(**attrs).all()
+    async def all_for(cls, **attrs):
+        return (await cls.filter_by(**attrs)).all()
 
     @classmethod
-    def all_for_condition(cls, condition):
-        return cls.filter(condition).all()
+    async def all_for_condition(cls, condition):
+        return (await cls.filter(condition)).all()
 
 
-MergeMapperArgsMixin = declarative_base(metaclass=MergeMapperArgsMeta)
-AutoTableCreationMixin = declarative_base(metaclass=AutoTableCreationMeta)
+CommonMixins = (ReprMixin, RepositoryMixin, MergeMapperArgsMixin)
 
+class MainSqlalchemyBase(DeclarativeBase):
+    pass
 
-BaseMixins = (AutoTableCreationMixin, ReprMixin, RepositoryMixin)
+BaseMixins = (MainSqlalchemyBase, ReprMixin, RepositoryMixin, MergeMapperArgsMixin)
