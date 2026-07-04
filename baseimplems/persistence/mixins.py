@@ -145,16 +145,16 @@ class SessionMixin:
 
     @classproperty
     async def query(cls):
-        return await cls.session.execute(select(cls))
+        return await current_sqlalchemy_session.execute(select(cls))
 
     @classmethod
     async def query_for(cls, *args, **kwargs):
-        return await cls.session.execute(select(cls)).filter(*args).filter_by(**kwargs)
+        return await current_sqlalchemy_session.execute(select(cls)).filter(*args).filter_by(**kwargs)
 
     async def save(self, commit=True):
-        await self.session.add(self)
+        current_sqlalchemy_session.add(self)
         if commit:
-            await commit_and_rollback_if_exception(self.session)
+            await commit_and_rollback_if_exception(current_sqlalchemy_session)
         return self
 
 
@@ -173,10 +173,14 @@ class RepositoryMixin(SessionMixin):
 
     @classmethod
     async def create(cls, commit=True, **argv):
-        return await cls().fill(**argv).save(commit=commit)
+        data = cls()
+        data.fill(**argv)
+        await data.save(commit=commit)
+        return data
 
     async def update(self, commit=True, **argv):
-        return await self.fill(**argv).save(commit=commit)
+        data = self.fill(**argv)
+        await data.save(commit=commit)
 
     async def delete(self, commit=True):
         await self.session.delete(self)

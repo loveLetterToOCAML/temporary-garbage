@@ -8,6 +8,7 @@ import anyio
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+import time
 import os
 
 
@@ -38,6 +39,17 @@ run_with_persistent_mock_db_engine = run_within(
 )
 
 
+async def attempt_unlink(fname, max_time: float = 3, sleep_time: float = 0.5):
+    start = time.time()
+    while time.time() - start < max_time:
+        try:
+            os.unlink(fname)
+            return
+        except Exception as e:
+            print(f"[-] Failed to remove {fname}: {e}, will retry in {sleep_time}")
+        await anyio.sleep(sleep_time)
+    print(f"[-] Failed to remove {fname}, stopping deletion attempts, please check manually")
+
 async def wait_for_input_with_timeout(prompt: str, timeout: float):
     with anyio.move_on_after(timeout) as scope:
         await aioconsole.ainput(prompt)
@@ -53,7 +65,8 @@ async def enclose_within_temporary_file_interactive_mock():
             timeout = 0x100
             await wait_for_input_with_timeout(f"Will exit the named scope for {f.name} in {timeout} seconds (or input enter to exit)", timeout)
     finally:
-        os.unlink(f.name)
+        await attempt_unlink(f.name)
+
 
 
 run_with_temporarily_persistent_mock_db_engine = run_within(

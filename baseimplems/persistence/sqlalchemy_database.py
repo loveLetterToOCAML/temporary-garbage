@@ -20,8 +20,16 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
         self._ready = Event()
         self._lock = Lock()
         self._session_factory = None
+        self._engine = None
 
-    async def _ensure_schema(self) -> None:
+    async def force_schema_update(self):
+        if not self._engine:
+            raise NotInAsyncContextManager('force_schema_update', 'SqlalchemyBaseHandler')
+        async with self._engine.begin() as conn:
+            from baseimplems.persistence.mixins import MainSqlalchemyBase
+            await conn.run_sync(MainSqlalchemyBase.metadata.create_all)
+
+    async def _ensure_schema(self):
         async with self._lock:  # ensure we go there once at most
             if self._ready.is_set():
                 return
@@ -65,9 +73,13 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
         finally:
             sqlalchemy_base.reset(prev)
             await self._engine.dispose()
+            self._session_factory = None
+            self._engine = None
 
 
 sqlalchemy_base = ContextVar[SqlalchemyBaseHandler]('sqlalchemy_base')
+run_within_sqlalchemy = run_within(SqlalchemyBaseHandler, sqlalchemy_base)
+
 # we do not enforce it as the current_session property, since we allow a dedicated run_within this object
 current_sqlalchemy_session = ContextVarWrapper[AsyncSession]('sqlalchemy_session')
 run_within_session = run_within(AsyncSession, current_sqlalchemy_session)
