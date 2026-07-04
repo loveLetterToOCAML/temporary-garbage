@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import wraps
+
 from baseimplems.anyio_utils import NotInAsyncContextManager, AsyncContextManagerDependencyNotEntered, run_within
 from baseimplems.persistence.sqlalchemy_persist import sqlalchemy_db_engine
 from baseimplems.contextvar_utils import ContextVarWrapper
@@ -77,12 +79,27 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
             self._engine = None
 
 
-sqlalchemy_base = ContextVar[SqlalchemyBaseHandler]('sqlalchemy_base')
+sqlalchemy_base = ContextVarWrapper[SqlalchemyBaseHandler]('sqlalchemy_base')
 run_within_sqlalchemy = run_within(SqlalchemyBaseHandler, sqlalchemy_base)
 
 # we do not enforce it as the current_session property, since we allow a dedicated run_within this object
 current_sqlalchemy_session = ContextVarWrapper[AsyncSession]('sqlalchemy_session')
 run_within_session = run_within(AsyncSession, current_sqlalchemy_session)
+
+
+def with_auto_session(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        async with sqlalchemy_base.session():
+            return await f(*args, **kwargs)
+    return sub
+
+def with_auto_session_kwargs(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        async with sqlalchemy_base.session() as session:
+            return await f(*args, **kwargs, session=session)
+    return sub
 
 
 if __name__ == '__main__':
@@ -114,5 +131,11 @@ if __name__ == '__main__':
             async with run_within_session(sess2):
                 print(f"[.] Running within session 2 {current_sqlalchemy_session.get()}")
                 print(await Test.all())
+
+            @with_auto_session_kwargs
+            async def f(session):
+                print(session)
+
+            await f()
 
     anyio.run(main)

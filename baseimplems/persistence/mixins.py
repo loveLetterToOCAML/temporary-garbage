@@ -144,12 +144,16 @@ class SessionMixin:
         return current_sqlalchemy_session.get()
 
     @classproperty
+    def select(cls):
+        return select(cls)
+
+    @classproperty
     async def query(cls):
-        return await current_sqlalchemy_session.execute(select(cls))
+        return await current_sqlalchemy_session.execute(cls.select)
 
     @classmethod
     async def query_for(cls, *args, **kwargs):
-        return await current_sqlalchemy_session.execute(select(cls)).filter(*args).filter_by(**kwargs)
+        return await current_sqlalchemy_session.execute(cls.select.filter(*args).filter_by(**kwargs))
 
     async def save(self, commit=True):
         current_sqlalchemy_session.add(self)
@@ -197,21 +201,25 @@ class RepositoryMixin(SessionMixin):
             await cls.session.flush()
 
     @classmethod
+    async def _execute(cls, stmt):
+        result = await current_sqlalchemy_session.execute(stmt)
+        return result.scalars()
+
+    @classmethod
     async def all(cls):
-        return (await cls.query).all()
+        return (await cls._execute(cls.select)).all()
 
     @classmethod
     async def first(cls):
-        return (await cls.query).first()
+        return (await cls._execute(cls.select)).first()
 
     @classmethod
     async def find(cls, id_):
-        return (await cls.query).get(id_)
-
+        return await current_sqlalchemy_session.get(cls, id_)
 
     @classmethod
     async def get_for(cls, **attrs):
-        return (await cls.query.filter_by(**attrs)).one_or_none()
+        return (await cls._execute(cls.select.filter_by(**attrs))).one_or_none()
 
     @classmethod
     async def get_create(cls, commit=True, **attrs):

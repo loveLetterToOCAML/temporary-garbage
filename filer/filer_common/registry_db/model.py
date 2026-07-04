@@ -1,6 +1,6 @@
 from baseimplems.persistence.model_utils.model_utils_common import WithULID, WithStringHash, WithSizeAttributes, \
     TWithStringHash, TWithBytesHash, WithUniqueName, TWithID, WithBytesHashPrimaryKey, \
-    WithStringHashPrimaryKey
+    WithStringHashPrimaryKey, WithSoftDelete
 from baseimplems.persistence.model_utils.high_order_sqlalchemy_registry import register_sqlalchemy_type, \
     default_sqlalchemy_classname_keying
 from baseimplems.persistence.model_utils.model_utils_time import CreatedAt
@@ -42,7 +42,7 @@ def RegistryMetadataTable_for(MetadataType: TWithID, HashType: TWithStringHash |
         attrs["hash_id"] = hash_id
         attrs["hash"] = relationship(HashType, foreign_keys=hash_id,
                                      backref=f"__hash_for_{hash_type_name}_metadata")
-    bases = (WithULID, *WithAdditional, WithSizeAttributes, CreatedAt, *BaseMixins)
+    bases = (WithULID, WithSoftDelete, WithSizeAttributes, CreatedAt, *WithAdditional, *BaseMixins)
     return type(attrs['__tablename__'], bases, attrs)
 
 
@@ -89,6 +89,13 @@ if __name__ == '__main__':
                 T1(
                     metadata_instance=m1,
                     hash='thisisuniquehash',
+                    size=150
+                )
+            )
+            sess.add(
+                T1(
+                    metadata_instance=m1,
+                    hash='thisisuniquehashagain',
                     size=150
                 )
             )

@@ -2,7 +2,7 @@ from baseimplems.persistence.model_utils.naming_context import prefix_policy, su
 from baseimplems.persistence.mixins import RepositoryMixin
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, LargeBinary
+from sqlalchemy import Integer, String, LargeBinary, Boolean
 from ulid import ULID
 
 from typing import TypeVar
@@ -58,6 +58,14 @@ class WithBytesHashPrimaryKey:
     __named_hash__ = 'hash'
 
     hash: Mapped[bytes] = mapped_column(__named_hash__, LargeBinary(0x200), nullable=False, primary_key=True)
+
+
+class WithSoftDelete:
+    __abstract__ = True
+
+    __named_is_deleted__ = 'is_deleted'
+
+    is_deleted: Mapped[bool] = mapped_column(__named_is_deleted__, Boolean, default=False)
 
 
 MAX_NAME_LENGTH = 255

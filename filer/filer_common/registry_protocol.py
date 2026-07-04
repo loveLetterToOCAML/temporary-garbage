@@ -6,7 +6,7 @@ from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
 
 from typing import Protocol, TypeVar, Generic, AsyncIterable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
 from functools import wraps
 
 
@@ -31,6 +31,7 @@ X = TypeVar('X')
 class SimpleListQueryRequest(BaseModel):
     offset: int = 0
     limit: int = 0x1000
+    includesDeleted: bool = False
 
 class SimpleListQueryResponse(BaseModel, Generic[T]):
     results: list[T]
@@ -59,6 +60,9 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType], Proto
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:  # bool : True is convention for deleted elements
         ...
 
+    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:  # returns the metadata even if object is deleted
+        ...
+
     async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
         ...
 
@@ -70,15 +74,16 @@ def guarded(func):
     @wraps(func)
     async def guard(self, *args, **kwargs):
         if not self._async_context_active:
-            raise NotInAsyncContextManager(func.__name__, 'RegistryInContext')
+            raise NotInAsyncContextManager(func.__name__, self.__class__.__name__)
         return await func(self, *args, **kwargs)
     return guard
 
 class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
 
-    def __init__(self, internal_registry):
+    def __init__(self, internal_registry, upper_async_context_manager: _AsyncGeneratorContextManager | None = None):
         self._internal_registry = internal_registry
         self._async_context_active = False
+        self._upper_async_context_manager = upper_async_context_manager
 
     @guarded
     async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
@@ -95,6 +100,10 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
     @guarded
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
         return await self._internal_registry.metadata_for_hash(hash)
+
+    @guarded
+    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
+        return await self._internal_registry.old_metadata_for_hash(hash)
 
     @guarded
     async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
@@ -114,9 +123,22 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
         return await self._internal_registry.list_items_of_type(item_type, request)
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
+    async def _enclose_activity_boolean(self):
         try:
             self._async_context_active = True
             yield self
         finally:
             self._async_context_active = False
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
+        if self._upper_async_context_manager:
+            async with (
+                self._upper_async_context_manager,
+                self._enclose_activity_boolean() as r
+            ):
+                yield r
+            return
+
+        async with self._enclose_activity_boolean() as r:
+            yield r
