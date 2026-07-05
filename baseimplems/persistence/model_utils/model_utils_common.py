@@ -20,8 +20,8 @@ class WithULID:
 
     __named_ulid__ = 'ulid'
 
-    ulid: Mapped[str] = mapped_column(__named_ulid__, String(26),
-                                      nullable=False, unique=True, default=lambda: f"{ULID()}")
+    ulid: Mapped[ULID] = mapped_column(__named_ulid__, String(26),
+                                       nullable=False, unique=True, default=lambda: f"{ULID()}")
 
 class WithStringHash:
     __abstract__ = True
@@ -92,7 +92,7 @@ class WithSizeAttributes:
 
     __size_of_data_name__ = 'size_of'
 
-    size: Mapped[int] = mapped_column(__size_of_data_name__, Integer)
+    size: Mapped[int] = mapped_column(__size_of_data_name__, Integer, default=0)
 
 
 TWithID = TypeVar("TWithID", bound=WithID)

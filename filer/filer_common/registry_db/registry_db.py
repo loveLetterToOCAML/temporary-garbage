@@ -1,47 +1,52 @@
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from filer.filer_common.registry_protocol import Registry, SimpleListQueryRequest, SimpleListQueryResponse, \
     RegistryInContext
-from baseimplems.persistence.model_utils.model_utils_common import TWithID, TWithBytesHash, TWithStringHash
 from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy, with_auto_session, \
     with_auto_session_kwargs
+from baseimplems.persistence.model_utils.model_utils_common import TWithID, TWithBytesHash, TWithStringHash, WithID
+from baseimplems.persistence.mixins import RepositoryMixin, commit_and_rollback_if_exception, BaseMixins
 from filer.filer_common.registry_db.model import RegistryMetadataTable_for
-from baseimplems.persistence.mixins import RepositoryMixin, commit_and_rollback_if_exception
 
-from anyio import AsyncContextManagerMixin, Lock
+from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
+
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
+from typing import TypeVar, Type, Any
 
-from typing import TypeVar, Type
 
 HashType = TypeVar('HashType')
 MetadataType = TypeVar('MetadataType', bound=RepositoryMixin)
 
 
-
-class DatabaseRegistry(Registry[HashType, str, MetadataType]):
+class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
 
     def __init__(self, *, metadata_type: TWithID, hash_type: TWithStringHash | TWithBytesHash | Type | None = None,
                  delete_metadata_info_on_delete: bool = False):
         self._metadata_type: RepositoryMixin = RegistryMetadataTable_for(metadata_type, hash_type)
         self._delete_metadata_info_on_delete = delete_metadata_info_on_delete
+        self._internal_metadata_type = metadata_type
+        self._hash_type = hash_type
+        self._metadata_pydantic = metadata_type.pydantic_from_sqlalchemy()
+        try:
+            self._hash_pydantic = hash_type.pydantic_from_sqlalchemy()
+        except:
+            self._hash_pydantic = None
 
     @with_auto_session
-    async def hash_for_ulid(self, ulid: str) -> HashType | None:
+    async def hash_for_ulid(self, ulid: ULID) -> HashType | None:
         result = await self._metadata_type.get_for(ulid=ulid)
         if result:
             return result.hash
 
     @with_auto_session
-    async def ulid_for_hash(self, hash: HashType) -> str | None:
+    async def ulid_for_hash(self, hash: HashType) -> ULID | None:
         result = await self._metadata_type.get_for(hash=hash)
         if result:
             return result.ulid
 
     @with_auto_session
-    async def check_hash_and_ulid(self, hash: HashType, ulid: str) -> bool | None:
+    async def check_hash_and_ulid(self, hash: HashType, ulid: ULID) -> bool | None:
         result = await self._metadata_type.get_for(hash=hash)
         if not result:
             return None
@@ -54,67 +59,88 @@ class DatabaseRegistry(Registry[HashType, str, MetadataType]):
             return
         if result.is_deleted:
             return True
-        return result
+        return await self.old_metadata_for_hash(hash)
 
     @with_auto_session
     async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
-        return await self._metadata_type.get_for(hash=hash)
+        return (await self._internal_metadata_type.execute_query(
+            select(self._internal_metadata_type, self._metadata_type) \
+                .options(joinedload(self._metadata_type.metadata_instance)) \
+                .join(self._metadata_type)
+                .filter_by(hash=hash)
+        )).scalar_one()
 
     @with_auto_session_kwargs
-    async def new_item(self, hash: HashType, item_metadata: MetadataType, *, session: AsyncSession) -> str:
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0, *, session: AsyncSession) -> ULID:
         already_there = await self._metadata_type.get_for(hash=hash)
         if already_there:
             raise Exception(f"Already known {hash} with ulid {already_there.ulid}")
-        new_obj = await self._metadata_type.create(hash=hash, metadata_instance=item_metadata)
+        new_obj = await self._metadata_type.create(hash=hash, metadata_instance=item_metadata, size_of=size_of_data)
         await commit_and_rollback_if_exception(session)
         return new_obj.ulid
 
     @with_auto_session
     async def delete_item(self, hash: HashType) -> bool | None:
         already_there = await self._metadata_type.get_for(hash=hash)
-        if already_there:
-            return
+        if not already_there:
+            raise Exception(f"Metadata for hash {hash} does not exist, no deletion possible")
         if self._delete_metadata_info_on_delete:
-            already_there.delete()
+            await already_there.delete()
         else:
             already_there.is_deleted = True
 
     @with_auto_session
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
-        if request.offset < 0 or request.limit <= 0:
-            raise IndexError(request.offset)
-        return SimpleListQueryResponse[MetadataType](
-            results = [self._metadata_for_hashes[h] for h in  self._metadata_type.get_for(hash=hash)],
-            hasMore = request.offset + request.limit < len(self._hashes),
+    async def resolve_query(self, offset, limit, attr_func, includes_deleted: bool = False, includes_metadata: bool = False):
+        if offset < 0 or limit <= 0:
+            raise IndexError(offset)
+        base_query = select(self._metadata_type)
+        if not includes_deleted:
+            base_query = base_query.filter_by(is_deleted=False)
+        if includes_metadata:
+            base_query = base_query.options(joinedload(self._metadata_type.metadata_instance)).join(self._internal_metadata_type)
+        results = await self._metadata_type.execute_query(
+            base_query.offset(offset).limit(limit)
         )
+        count = await self._metadata_type.execute_query(
+            select(func.count()).select_from(self._metadata_type)
+        )
+        res = [attr_func(mt) for mt in results.scalars()]
+        final = SimpleListQueryResponse[self._metadata_pydantic | self._hash_pydantic | self._hash_type | ULID](
+            results = res,
+            hasMore = offset + limit < count.scalar_one(),
+        )
+        return final
 
     @with_auto_session
-    async def list_items_of_type(self, item_type: type[HashType | str | MetadataType], request: SimpleListQueryRequest) -> \
-            SimpleListQueryResponse[HashType | str | MetadataType]:
+    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[Any]:  # not able to state the dynamic type self._metadata_type
+        return await self.resolve_query(request.offset, request.limit, lambda x: self._metadata_pydantic.model_validate(x.metadata_instance), request.includesDeleted, True)
+
+    @with_auto_session
+    async def list_items_of_type(self, item_type: type[HashType | str | MetadataType | Any], request: SimpleListQueryRequest) -> \
+            SimpleListQueryResponse[HashType | str | MetadataType | Any]:
+        includes_mt = False
         if item_type == self._hash_type:
-            return SimpleListQueryResponse[HashType](
-                results = self._hashes[request.offset: request.offset+request.limit],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
-        elif item_type == self._ulid_type:
-            return SimpleListQueryResponse[UlidType](
-                results = [self._ulids_for_hashes[h] for h in self._hashes[request.offset: request.offset+request.limit]],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
+            attr_func = lambda x: self._hash_pydantic and self._hash_pydantic.model_validate(x.hash) or x.hash
         elif item_type == self._metadata_type:
-            return SimpleListQueryResponse[MetadataType](
-                results = [self._metadata_for_hashes[h] for h in self._hashes[request.offset: request.offset+request.limit]],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
+            includes_mt = True
+            attr_func = lambda x: x
+        elif item_type == str or item_type == ULID:
+            attr_func = lambda x: x.ulid
+        elif item_type == self._internal_metadata_type:
+            includes_mt = True
+            attr_func = lambda x: self._metadata_pydantic.model_validate(x.metadata_instance)
         else:
             raise NotImplementedError
 
-class DatabaseRegistryInContext(RegistryInContext[HashType, str, MetadataType]):
+        return await self.resolve_query(request.offset, request.limit, attr_func, request.includesDeleted, includes_mt)
 
-    def __init__(self, *, metadata_type: TWithID, hash_type: TWithStringHash | TWithBytesHash | Type | None = None):
-        self._metadata_type = RegistryMetadataTable_for(metadata_type, hash_type)
+
+class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType]):
+
+    def __init__(self, *, metadata_type: TWithID, hash_type: TWithStringHash | TWithBytesHash | Type | None = None,
+                 delete_metadata_info_on_delete: bool = False):
         reg = DatabaseRegistry[HashType, MetadataType](
-            metadata_type, hash_type
+            metadata_type=metadata_type, hash_type=hash_type, delete_metadata_info_on_delete=delete_metadata_info_on_delete
         )
         super().__init__(reg, self._ensure_current_db)
 
@@ -126,113 +152,36 @@ class DatabaseRegistryInContext(RegistryInContext[HashType, str, MetadataType]):
         ):
             yield
 
-    async def hash_for_ulid(self, ulid: str) -> HashType | None:
-        return self._hashes_for_ulids.get(ulid)
-
-    async def ulid_for_hash(self, hash: HashType) -> UlidType | None:
-        return self._ulids_for_hashes.get(hash)
-
-    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
-        u = self._ulids_for_hashes.get(hash)
-        if u is None:
-            return
-        return u == ulid
-
-    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
-        return self._metadata_for_hashes.get(hash) or self._deleted.get(hash)
-
-    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
-        if hash in self._ulids_for_hashes:
-            raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
-        async with Lock():
-            ulid = self._ulid_type()
-            if ulid in self._hashes_for_ulids:
-                raise Exception(f"Generated ulid {ulid} already in internal state, should not happen")
-            self._hashes_for_ulids[ulid] = hash
-            self._ulids_for_hashes[hash] = ulid
-            self._metadata_for_hashes[hash] = item_metadata
-            self._hashes.append(hash)
-        return ulid
-
-    async def delete_item(self, hash: HashType) -> bool | None:
-        if hash not in self._ulids_for_hashes:
-            return None
-
-        async with Lock():
-            del self._ulids_for_hashes[hash]
-            del self._metadata_for_hashes[hash]
-            self._deleted[hash] = True
-
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
-        if request.offset < 0 or request.limit <= 0 or request.offset >= len(self._hashes):
-            raise IndexError(request.offset)
-        return SimpleListQueryResponse[MetadataType](
-            results = [self._metadata_for_hashes[h] for h in self._hashes[request.offset: request.offset+request.limit]],
-            hasMore = request.offset + request.limit < len(self._hashes),
-        )
-
-    async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType], request: SimpleListQueryRequest) -> \
-            SimpleListQueryResponse[HashType | UlidType | MetadataType]:
-        if item_type == self._hash_type:
-            return SimpleListQueryResponse[HashType](
-                results = self._hashes[request.offset: request.offset+request.limit],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
-        elif item_type == self._ulid_type:
-            return SimpleListQueryResponse[UlidType](
-                results = [self._ulids_for_hashes[h] for h in self._hashes[request.offset: request.offset+request.limit]],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
-        elif item_type == self._metadata_type:
-            return SimpleListQueryResponse[MetadataType](
-                results = [self._metadata_for_hashes[h] for h in self._hashes[request.offset: request.offset+request.limit]],
-                hasMore = request.offset + request.limit < len(self._hashes),
-            )
-        else:
-            raise NotImplementedError
-
-
-class InMemRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
-
-    def __init__(self, initial_metadata: dict[HashType, MetadataType] | None = None, initial_ulids: dict[HashType, UlidType] | None = None, *,
-                 hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType]):
-        reg = InMemRegistry[HashType, UlidType, MetadataType](
-            initial_metadata=initial_metadata,
-            initial_ulids=initial_ulids,
-            hash_type=hash_type,
-            ulid_type=ulid_type,
-            metadata_type=metadata_type
-        )
-        super().__init__(reg)
-
 
 if __name__ == '__main__':
-    import random
+    from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
+    from sqlalchemy.testing.schema import mapped_column
+    from sqlalchemy.orm import Mapped, joinedload
+    from sqlalchemy import Integer, select, func
     import anyio
 
-    class Ulid:
-        def __init__(self):
-            self.r = random.randint(0, 200)
 
-        def __eq__(self, other):
-            return self.r == other.r
+    class M(WithID, *BaseMixins):
+        __tablename__ = 'M'
+        a: Mapped[int] = mapped_column(Integer)
 
-        def __hash__(self):
-            return self.r
-
-        def __repr__(self):
-            return f"{self.r}"
-
-    class M(BaseModel):
-        a: int = 1
-        b: str = 'b'
 
     async def test():
-        async with InMemRegistryInContext[bytes, Ulid, M](hash_type=bytes, ulid_type=Ulid, metadata_type=M) as mock:
+        async with (
+            run_with_temporarily_persistent_mock_db_engine(echo=False),
+            DatabaseRegistryInContext[bytes, M](hash_type=bytes, metadata_type=M) as mock
+        ):
             print(await mock.new_item(b'x', M(a=123)))
-            print(await mock.new_item(b'y', M(b='metadata')))
-            print(await mock.list_items(SimpleListQueryRequest(limit=1)))
+            print(await mock.new_item(b'y', M(a=999)))
+            #print(await mock.list_items(SimpleListQueryRequest(limit=1)))
             print(await mock.list_items_of_type(bytes, SimpleListQueryRequest()))
-            print(await mock.list_items_of_type(Ulid, SimpleListQueryRequest()))
+            print(await mock.list_items_of_type(str, SimpleListQueryRequest()))
+            await mock.delete_item(b'y')
+            print(await mock.metadata_for_hash(b'y'))
+            print(await mock.old_metadata_for_hash(b'y'))
+            print(await mock.list_items(SimpleListQueryRequest()))
+            print(await mock.list_items(SimpleListQueryRequest(includesDeleted=True)))
+            #print(await mock.new_item(b'y', M(a=9994523)))
+        print(await mock.new_item(b'x', M(a=123)))
 
     anyio.run(test)

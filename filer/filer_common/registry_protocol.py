@@ -5,8 +5,8 @@ from baseimplems.anyio_utils import NotInAsyncContextManager
 from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
 
-from typing import Protocol, TypeVar, Generic, AsyncIterable
 from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
+from typing import Protocol, TypeVar, Generic, AsyncIterable, Any
 from functools import wraps
 
 
@@ -39,6 +39,10 @@ class SimpleListQueryResponse(BaseModel, Generic[T]):
 
 class Listable(Protocol[T, X]):
 
+    # list_items and list_items_of_type introduce a dependency to pydantic BaseModel
+    # this may be avoided / put in a separate concept as it causes merging issues between arbitrary Generic type
+    # and the output type which must be a BaseModel to be compatible with SimpleListQueryResponse
+    # another way to solve this issue is to relate to the serializable tree concept
     async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[T]:
         ...
 
@@ -63,7 +67,7 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType], Proto
     async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:  # returns the metadata even if object is deleted
         ...
 
-    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         ...
 
     async def delete_item(self, hash: HashType) -> bool | None:  # responsibility remains to the implementer to handle soft-delete
@@ -106,8 +110,8 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
         return await self._internal_registry.old_metadata_for_hash(hash)
 
     @guarded
-    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
-        return await self._internal_registry.new_item(hash, item_metadata)
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
+        return await self._internal_registry.new_item(hash, item_metadata, size_of_data)
 
     @guarded
     async def delete_item(self, hash: HashType) -> bool | None:
@@ -118,8 +122,8 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
         return await self._internal_registry.list_items(request)
 
     @guarded
-    async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType], request: SimpleListQueryRequest) -> \
-            SimpleListQueryResponse[HashType | UlidType | MetadataType]:
+    async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType | Any], request: SimpleListQueryRequest) -> \
+            SimpleListQueryResponse[HashType | UlidType | MetadataType | Any]:
         return await self._internal_registry.list_items_of_type(item_type, request)
 
     @asynccontextmanager
@@ -134,7 +138,7 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
     async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
         if self._upper_async_context_manager:
             async with (
-                self._upper_async_context_manager,
+                self._upper_async_context_manager(),
                 self._enclose_activity_boolean() as r
             ):
                 yield r

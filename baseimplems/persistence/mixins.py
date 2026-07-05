@@ -2,7 +2,11 @@ from baseimplems.persistence.sqlalchemy_database import current_sqlalchemy_sessi
 
 from sqlalchemy.orm import RelationshipProperty, DeclarativeBase
 from sqlalchemy.ext.hybrid import HybridExtensionType
+from sqlalchemy.ext.asyncio import AsyncAttrs
+from pydantic import create_model, ConfigDict
 from sqlalchemy import inspect, select
+
+from typing import Any
 
 
 class classproperty:
@@ -55,6 +59,118 @@ class IntrospectionMixin:
         items = inspect(cls).all_orm_descriptors
         return [item.__name__ for item in items
                 if item.extension_type == HybridExtensionType]
+
+
+_TYPE_NAME_MAP = {
+    int: "int",
+    str: "str",
+    float: "float",
+    bool: "bool",
+    bytes: "bytes",
+}
+
+def _python_type_name(python_type) -> str:
+    name = _TYPE_NAME_MAP.get(python_type)
+    if name:
+        return name
+    return python_type.__name__
+
+
+class PydanticMixin:
+    __abstract__ = True
+
+    @classmethod
+    def pydantic_from_sqlalchemy(cls, *, include: set[str] | None = None):
+        mapper = inspect(cls)
+        fields: dict[str, Any] = {}
+        for column in mapper.columns:
+            if include is not None and column.key not in include:
+                continue
+            python_type = column.type.python_type
+            default = None if column.nullable else ...
+            fields[column.key] = (python_type | None if column.nullable else python_type, default)
+        return create_model(cls.__tablename__, __config__=ConfigDict(from_attributes=True), **fields)
+
+    @classmethod
+    def print_pydantic_model_source(
+            cls,
+            *,
+            class_name: str | None = None,
+            include: set[str] | None = None,
+            exclude: set[str] | None = None,
+            base_class: str = "BaseModel",
+            from_attributes: bool = True,
+    ) -> str:
+        """
+        Generate Python source for a Pydantic model mirroring the given
+        SQLAlchemy model's columns. Prints/returns source text meant to be
+        copy-pasted as a static class, not executed dynamically.
+        """
+        mapper = inspect(cls)
+        exclude = exclude or set()
+
+        lines: list[str] = []
+        imports_needed: set[str] = set()
+
+        resolved_name = class_name or f"{cls.__name__}Schema"
+
+        lines.append(f"class {resolved_name}({base_class}):")
+        if from_attributes:
+            lines.append('    model_config = ConfigDict(from_attributes=True)')
+            lines.append("")
+
+        any_field = False
+        for column in mapper.columns:
+            key = column.key
+            if include is not None and key not in include:
+                continue
+            if key in exclude:
+                continue
+
+            python_type = column.type.python_type
+            type_name = _python_type_name(python_type)
+
+            if python_type not in (int, str, float, bool, bytes):
+                imports_needed.add(python_type.__module__)
+
+            if column.nullable:
+                annotation = f"{type_name} | None"
+                default = " = None"
+            else:
+                annotation = type_name
+                default = ""
+
+            lines.append(f"    {key}: {annotation}{default}")
+            any_field = True
+
+        if not any_field:
+            lines.append("    pass")
+
+        source = "\n".join(lines)
+
+        if imports_needed:
+            hint = (
+                    "# NOTE: verify/add imports for non-builtin types used above, e.g.:\n"
+                    + "\n".join(f"#   from {mod} import ..." for mod in sorted(imports_needed))
+                    + "\n\n"
+            )
+            source = hint + source
+
+        return source
+
+    @classmethod
+    def print_pydantic_relationship_fields(cls) -> str:
+        mapper = inspect(cls)
+        rels = [
+            attr.key for attr in mapper.attrs
+            if isinstance(attr, RelationshipProperty)
+        ]
+        if not rels:
+            return "# (no relationships found)"
+        lines = ["# Relationships found on this model — decide manually how to expose each:"]
+        for r in rels:
+            lines.append(f"#   {r}: <NestedSchema> | int (id only) | omit entirely")
+        return "\n".join(lines)
 
 
 # mostly inspired from https://github.com/absent1706/sqlalchemy-mixins/blob/master/sqlalchemy_mixins/repr.py
@@ -111,13 +227,17 @@ class ReprMixin(IntrospectionMixin):
 
     @property
     def _repr_attrs_str(self):
+        state = inspect(self)
         attrs = self.__repr_attrs__ if self.__repr_attrs__ else self.columns + \
                                                                 [k for k in self.relations if k[:2] != '__']
         values = []
         for key in attrs:
             if key in self.primary_keys:
                 continue
-            value = getattr(self, key)
+            if key in state.unloaded:
+                value = '<unloaded>'
+            else:
+                value = getattr(self, key)
             wrap_in_quote = isinstance(value, str)
             if wrap_in_quote:
                 value = f"'{value}'"
@@ -147,13 +267,13 @@ class SessionMixin:
     def select(cls):
         return select(cls)
 
-    @classproperty
-    async def query(cls):
-        return await current_sqlalchemy_session.execute(cls.select)
+    @classmethod
+    def filter(cls, *args, **kwargs):
+        return cls.select.filter(*args).filter_by(**kwargs)
 
     @classmethod
-    async def query_for(cls, *args, **kwargs):
-        return await current_sqlalchemy_session.execute(cls.select.filter(*args).filter_by(**kwargs))
+    async def execute_query(cls, query):
+        return await current_sqlalchemy_session.execute(query)
 
     async def save(self, commit=True):
         current_sqlalchemy_session.add(self)
@@ -202,8 +322,7 @@ class RepositoryMixin(SessionMixin):
 
     @classmethod
     async def _execute(cls, stmt):
-        result = await current_sqlalchemy_session.execute(stmt)
-        return result.scalars()
+        return (await current_sqlalchemy_session.execute(stmt)).scalars()
 
     @classmethod
     async def all(cls):
@@ -211,15 +330,16 @@ class RepositoryMixin(SessionMixin):
 
     @classmethod
     async def first(cls):
-        return (await cls._execute(cls.select)).first()
+        return (await cls._execute(cls.select.limit(1))).first()
 
     @classmethod
     async def find(cls, id_):
-        return await current_sqlalchemy_session.get(cls, id_)
+        return await current_sqlalchemy_session.get().get(cls, id_)
 
     @classmethod
     async def get_for(cls, **attrs):
-        return (await cls._execute(cls.select.filter_by(**attrs))).one_or_none()
+        a = (await cls._execute(cls.select.filter_by(**attrs).limit(2))).one_or_none()
+        return a
 
     @classmethod
     async def get_create(cls, commit=True, **attrs):
@@ -241,25 +361,17 @@ class RepositoryMixin(SessionMixin):
         return await cls.get_from_instance(instance, commit=argv.get('commit', True))
 
     @classmethod
-    async def filter_by(cls, **attrs):
-        return await cls.query.filter_by(**attrs)
-
-    @classmethod
-    async def filter(cls, condition):
-        return await cls.query.filter(condition)
-
-    @classmethod
     async def all_for(cls, **attrs):
-        return (await cls.filter_by(**attrs)).all()
+        return (await cls._execute(cls.select.filter_by(**attrs))).all()
 
     @classmethod
     async def all_for_condition(cls, condition):
-        return (await cls.filter(condition)).all()
+        return (await cls._execute(cls.select.filter(condition))).all()
 
 
 CommonMixins = (ReprMixin, RepositoryMixin, MergeMapperArgsMixin)
 
-class MainSqlalchemyBase(DeclarativeBase):
+class MainSqlalchemyBase(AsyncAttrs, DeclarativeBase):
     pass
 
-BaseMixins = (MainSqlalchemyBase, ReprMixin, RepositoryMixin, MergeMapperArgsMixin)
+BaseMixins = (MainSqlalchemyBase, PydanticMixin, ReprMixin, RepositoryMixin, MergeMapperArgsMixin)

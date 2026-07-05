@@ -4,6 +4,7 @@ from baseimplems.persistence.model_utils.model_utils_common import WithULID, Wit
 from baseimplems.persistence.model_utils.high_order_sqlalchemy_registry import register_sqlalchemy_type, \
     default_sqlalchemy_classname_keying
 from baseimplems.persistence.model_utils.model_utils_time import CreatedAt
+from baseimplems.persistence.mixins import BaseMixins
 
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy import ForeignKey, String
@@ -50,7 +51,6 @@ if __name__ == '__main__':
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
     from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy
     from baseimplems.persistence.model_utils.model_utils_common import WithID
-    from baseimplems.persistence.mixins import BaseMixins
 
     import anyio
 

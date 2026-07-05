@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from functools import wraps
-
 from baseimplems.anyio_utils import NotInAsyncContextManager, AsyncContextManagerDependencyNotEntered, run_within
 from baseimplems.persistence.sqlalchemy_persist import sqlalchemy_db_engine
 from baseimplems.contextvar_utils import ContextVarWrapper
@@ -11,7 +9,7 @@ from anyio import AsyncContextManagerMixin, Event, Lock
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from functools import wraps
 
 
 class SqlalchemyBaseHandler(AsyncContextManagerMixin):
@@ -54,6 +52,8 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
                 yield self._session
             finally:
                 current_sqlalchemy_session.reset(prev)
+                from baseimplems.persistence.mixins import commit_and_rollback_if_exception
+                await commit_and_rollback_if_exception(self._session)
 
     @property
     def current_session(self) -> AsyncSession:

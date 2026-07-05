@@ -58,7 +58,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
     async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
         return self._metadata_for_hashes.get(hash)
 
-    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         if hash in self._ulids_for_hashes:
             raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
         async with self._lock:

@@ -19,4 +19,4 @@ def register_sqlalchemy_type(typename, depends_on):
 
 
 def default_sqlalchemy_classname_keying(*args):
-    return (hasattr(obj, '__tablename__') and obj.__tablename__ or obj.__name__ for obj in args)
+    return (hasattr(obj, '__tablename__') and obj.__tablename__ or (isinstance(obj, str) and obj) or obj.__name__ for obj in args)

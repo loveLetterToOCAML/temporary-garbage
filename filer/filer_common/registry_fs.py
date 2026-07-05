@@ -5,32 +5,19 @@ from filer.filer_common.registry_protocol import Registry, SimpleListQueryReques
 
 from anyio import AsyncContextManagerMixin, Lock
 from pydantic import BaseModel
+from ulid import ULID
 
 from typing import TypeVar
 
 
-HashType = TypeVar('HashType')
+HashType = TypeVar('HashType', bound=str | bytes | BaseModel)
 UlidType = TypeVar('UlidType')
 MetadataType = TypeVar('MetadataType', bound=BaseModel)
 
 
-# Registry intends to be infinite append-only (almost) objects, meaning there is no need to handle context management
-# there is no context or async context management to implement there, but for the sake of mocking, we still provide
-# a basic registry type which is only related to a scope below. This will not be done for DB or external cloud related
-# backend. The in-mem and filesystem ones are special since these could be used for temporary mock / live functional
-# verifications
+class FsRegistry(Registry[HashType, ULID, MetadataType]):
 
-class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
-
-    def __init__(self, initial_metadata: dict[HashType, MetadataType] | None = None, initial_ulids: dict[HashType, UlidType] | None = None, *,
-                 hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType]):
-        self._metadata_for_hashes = initial_metadata or {}
-        self._ulids_for_hashes = {h: ulid for h, ulid in (initial_ulids or {}).items() if h in initial_metadata}
-        self._ulids_for_hashes = {h: UlidType() for h in self._metadata_for_hashes if h not in self._ulids_for_hashes}
-        self._hashes_for_ulids = {u: h for h, u in self._metadata_for_hashes.items()}
-        if len(self._hashes_for_ulids) != len(self._ulids_for_hashes):
-            raise Exception(f"Ulids and hashes should be unique {len(self._hashes_for_ulids)} {len(self._ulids_for_hashes)}")
-        self._hashes = list(self._metadata_for_hashes.keys())
+    def __init__(self, filename: str, hash_type: type[HashType], metadata_type: type[MetadataType]):
         self._deleted = {}
         self._hash_type = hash_type
         self._ulid_type = ulid_type
@@ -51,7 +38,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
         return self._metadata_for_hashes.get(hash) or self._deleted.get(hash)
 
-    async def new_item(self, hash: HashType, item_metadata: MetadataType) -> UlidType:
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         if hash in self._ulids_for_hashes:
             raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
         async with Lock():
