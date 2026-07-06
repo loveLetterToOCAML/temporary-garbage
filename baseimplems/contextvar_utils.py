@@ -3,6 +3,7 @@ from typing import TypeVar
 
 from typing_extensions import Generic
 
+from baseimplems.anyio_utils import NotInAsyncContextManager, AsyncContextManagerDependencyNotEntered
 
 T = TypeVar('T')
 
@@ -17,10 +18,11 @@ class ContextVarWrapper(Generic[T]):
     # otherwise we don't have the insurance the module imported var will be imported the same and match the exact same object in memory
     _registry: dict[str, ContextVar] = {}
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name, run_within_proposal: str | None = None, *args, **kwargs):
         if name not in self._registry:
             self._registry[name] = ContextVar[T](name, *args, **kwargs)
         self._ctxt_var: ContextVar[T] = self._registry[name]
+        self._run_within_proposal = run_within_proposal
 
     @property
     def value(self):
@@ -41,7 +43,11 @@ class ContextVarWrapper(Generic[T]):
             return self._ctxt_var.set
         elif item == 'reset':
             return self._ctxt_var.reset
-        return getattr(self._ctxt_var.get(), item)
+        try:
+            resolved = self._ctxt_var.get()
+        except LookupError:
+            raise AsyncContextManagerDependencyNotEntered(self._ctxt_var, self._run_within_proposal or self._ctxt_var.name, item)
+        return getattr(resolved, item)
 
 
 class ContextVarPropertyWrapper(Generic[T]):

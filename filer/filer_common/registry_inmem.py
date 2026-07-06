@@ -33,6 +33,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
             raise Exception(f"Ulids and hashes should be unique {len(self._hashes_for_ulids)} {len(self._ulids_for_hashes)}")
         self._hashes = list(self._metadata_for_hashes.keys())
         self._hashes_ok = SortedDict()
+        self._sizes_for_hash = {}
         self._deleted = set()
         self._hash_type = hash_type
         self._ulid_type = ulid_type
@@ -52,6 +53,9 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
             return
         return u == ulid
 
+    async def size_for_hash(self, hash: HashType) -> int | None:
+        return self._sizes_for_hash.get(hash)
+
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
         return hash in self._deleted or self._metadata_for_hashes.get(hash)
 
@@ -70,6 +74,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
             self._metadata_for_hashes[hash] = item_metadata
             self._hashes.append(hash)
             self._hashes_ok[hash] = True
+            self._sizes_for_hash[hash] = size_of_data
             if hash in self._deleted:
                 self._deleted = self._deleted.difference({hash})
         return ulid
@@ -83,18 +88,22 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
             del self._hashes_ok[hash]
             if not self._keep_deleted_metadata:
                 del self._metadata_for_hashes[hash]
+                del self._sizes_for_hash[hash]
             self._deleted.add(hash)
 
     async def resolve_query(self, offset, limit, hash_t, for_h):
         if offset < 0 or limit <= 0 or offset >= len(hash_t):
             raise IndexError(offset)
         async with self._lock:
-            return SimpleListQueryResponse[HashType | UlidType | MetadataType](
-                results = [for_h[h] if for_h else h for h in hash_t[offset: offset+limit]],
+            return SimpleListQueryResponse(
+                items = [for_h[h] if for_h else h for h in hash_t[offset: offset+limit]],
+                total = len(hash_t),
                 hasMore = offset + limit < len(hash_t),
             )
 
     async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
+        if request.sizeInferiorTo is not None or request.sizeSuperiorTo is not None:
+            raise NotImplementedError
         if request.includesDeleted:
             return await self.resolve_query(request.offset, request.limit, self._hashes, self._metadata_for_hashes)
         return await self.resolve_query(request.offset, request.limit, self._hashes_ok.keys(), self._metadata_for_hashes)

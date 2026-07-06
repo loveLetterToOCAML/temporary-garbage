@@ -21,6 +21,7 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
         self._lock = Lock()
         self._session_factory = None
         self._engine = None
+        self._session = None
 
     async def force_schema_update(self):
         if not self._engine:
@@ -42,10 +43,19 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
             self._ready.set()
 
     @asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
+    async def session(self, force_new: bool = True) -> AsyncIterator[AsyncSession]:
         if not self._session_factory:
             raise NotInAsyncContextManager('session', 'SqlalchemyBaseHandler')
         await self._ensure_schema()
+
+        if self._session and not force_new:
+            try:
+                yield self._session
+            finally:
+                from baseimplems.persistence.mixins import commit_and_rollback_if_exception
+                await commit_and_rollback_if_exception(self._session)
+                return
+
         async with self._session_factory() as self._session:
             prev = current_sqlalchemy_session.set(self._session)
             try:
@@ -80,21 +90,35 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
 
 
 sqlalchemy_base = ContextVarWrapper[SqlalchemyBaseHandler]('sqlalchemy_base')
-run_within_sqlalchemy = run_within(SqlalchemyBaseHandler, sqlalchemy_base)
+run_within_sqlalchemy = run_within(SqlalchemyBaseHandler, sqlalchemy_base, reenter_context=True)
 
 # we do not enforce it as the current_session property, since we allow a dedicated run_within this object
-current_sqlalchemy_session = ContextVarWrapper[AsyncSession]('sqlalchemy_session')
+current_sqlalchemy_session = ContextVarWrapper[AsyncSession]('sqlalchemy_session', run_within_proposal='run_within_session')
 run_within_session = run_within(AsyncSession, current_sqlalchemy_session)
 
 
 def with_auto_session(f):
     @wraps(f)
     async def sub(*args, **kwargs):
-        async with sqlalchemy_base.session():
+        async with sqlalchemy_base.session(force_new=False):
             return await f(*args, **kwargs)
     return sub
 
 def with_auto_session_kwargs(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        async with sqlalchemy_base.session(force_new=False) as session:
+            return await f(*args, **kwargs, session=session)
+    return sub
+
+def with_auto_new_session(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        async with sqlalchemy_base.session():
+            return await f(*args, **kwargs)
+    return sub
+
+def with_auto_new_session_kwargs(f):
     @wraps(f)
     async def sub(*args, **kwargs):
         async with sqlalchemy_base.session() as session:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import field, dataclass
+
 from baseimplems.anyio_utils import NotInAsyncContextManager
 
 from anyio import AsyncContextManagerMixin
@@ -25,24 +27,38 @@ UlidType = TypeVar('UlidType')
 MetadataType = TypeVar('MetadataType')
 
 
-T = TypeVar('T', bound=BaseModel)
+T = TypeVar('T')
 X = TypeVar('X')
 
-class SimpleListQueryRequest(BaseModel):
-    offset: int = 0
-    limit: int = 0x1000
-    includesDeleted: bool = False
 
-class SimpleListQueryResponse(BaseModel, Generic[T]):
-    results: list[T]
+#class SimpleListQueryRequest(BaseModel):
+#    offset: int = 0
+#    limit: int = 0x1000
+#    includesDeleted: bool = False
+
+#class SimpleListQueryResponse(BaseModel, Generic[T]):
+#    results: list[T]
+#    hasMore: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SimpleListQueryRequest:
+    offset: int = 0
+    limit: int = 0x100
+    includesDeleted: bool = False
+    sizeSuperiorTo: int | None = None
+    sizeInferiorTo: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SimpleListQueryResponse(Generic[T]):
+    items: list[T]
+    total: int
     hasMore: bool = False
+
 
 class Listable(Protocol[T, X]):
 
-    # list_items and list_items_of_type introduce a dependency to pydantic BaseModel
-    # this may be avoided / put in a separate concept as it causes merging issues between arbitrary Generic type
-    # and the output type which must be a BaseModel to be compatible with SimpleListQueryResponse
-    # another way to solve this issue is to relate to the serializable tree concept
     async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[T]:
         ...
 
@@ -50,7 +66,8 @@ class Listable(Protocol[T, X]):
         ...
 
 
-class Registry(Listable[MetadataType, HashType | UlidType | MetadataType], Protocol[HashType, UlidType, MetadataType]):
+# `Any` type in addition for listable, so that specific implementations can increase what can be listed
+class Registry(Listable[MetadataType, HashType | UlidType | MetadataType | Any], Protocol[HashType, UlidType, MetadataType]):
 
     async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
         ...
@@ -59,6 +76,9 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType], Proto
         ...
 
     async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
+        ...
+
+    async def size_for_hash(self, hash: HashType) -> int | None:
         ...
 
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:  # bool : True is convention for deleted elements
@@ -100,6 +120,10 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
     @guarded
     async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:
         return await self._internal_registry.check_hash_and_ulid(hash, ulid)
+
+    @guarded
+    async def size_for_hash(self, hash: HashType) -> int | None:
+        return await self._internal_registry.size_for_hash(hash)
 
     @guarded
     async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:

@@ -76,7 +76,6 @@ if __name__ == '__main__':
         async with (
             run_with_temporarily_persistent_mock_db_engine(),
             run_within_sqlalchemy() as db,
-            db,
             db.session() as sess,
         ):
             T3 = RegistryMetadataTable_for(Metadata, SpecificHash)

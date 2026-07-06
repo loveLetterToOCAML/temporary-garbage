@@ -76,7 +76,8 @@ def run_within(ModelType: Type | Callable, ctxt: ContextVar | ContextVarWrapper,
                default_bind_callable_arguments: dict[str, Callable] = None,
                upper_context_dependency: _AsyncGeneratorContextManager[dict[str, Any]] | None = None,
                with_static_bound_arguments: bool = True,
-               with_dynamic_bound_arguments: bool = True):
+               with_dynamic_bound_arguments: bool = True,
+               reenter_context: bool = False):
 
     if hasattr(ModelType, '__call__'):
         ModelTypeHint = Type
@@ -108,8 +109,15 @@ def run_within(ModelType: Type | Callable, ctxt: ContextVar | ContextVarWrapper,
                     additional[k] = da[ctxt][k]()
 
         @contextlib.asynccontextmanager
-        async def finish(instance):
+        async def finish(instance, reentered: bool = False):
             previous_instance = ctxt.set(instance)
+            if reenter_context and not reentered:
+                async with (
+                    instance,
+                    finish(instance, True)
+                ):
+                    yield
+                return
             try:
                 async with _with_cascade_context_updates(ctxt, instance):
                     yield

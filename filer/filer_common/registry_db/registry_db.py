@@ -13,6 +13,7 @@ from ulid import ULID
 
 from contextlib import asynccontextmanager
 from typing import TypeVar, Type, Any
+from types import NoneType
 
 
 HashType = TypeVar('HashType')
@@ -75,7 +76,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         already_there = await self._metadata_type.get_for(hash=hash)
         if already_there:
             raise Exception(f"Already known {hash} with ulid {already_there.ulid}")
-        new_obj = await self._metadata_type.create(hash=hash, metadata_instance=item_metadata, size_of=size_of_data)
+        new_obj = await self._metadata_type.create(hash=hash, metadata_instance=item_metadata, size=size_of_data)
         await commit_and_rollback_if_exception(session)
         return new_obj.ulid
 
@@ -90,30 +91,43 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
             already_there.is_deleted = True
 
     @with_auto_session
-    async def resolve_query(self, offset, limit, attr_func, includes_deleted: bool = False, includes_metadata: bool = False):
+    async def _resolve_query(self, offset, limit, attr_func, *,
+                             size_inferior_to: int | None = None, size_superior_to: int | None = None,
+                             includes_deleted: bool = False, includes_metadata: bool = False):
         if offset < 0 or limit <= 0:
             raise IndexError(offset)
         base_query = select(self._metadata_type)
         if not includes_deleted:
             base_query = base_query.filter_by(is_deleted=False)
+        if size_inferior_to is not None:
+            base_query = base_query.filter(self._metadata_type.size <= size_inferior_to)
+        if size_superior_to is not None:
+            base_query = base_query.filter(self._metadata_type.size >= size_superior_to)
         if includes_metadata:
             base_query = base_query.options(joinedload(self._metadata_type.metadata_instance)).join(self._internal_metadata_type)
         results = await self._metadata_type.execute_query(
             base_query.offset(offset).limit(limit)
         )
         count = await self._metadata_type.execute_query(
-            select(func.count()).select_from(self._metadata_type)
+            select(func.count()).select_from(base_query.subquery())
         )
+        total = count.scalar_one()
         res = [attr_func(mt) for mt in results.scalars()]
-        final = SimpleListQueryResponse[self._metadata_pydantic | self._hash_pydantic | self._hash_type | ULID](
-            results = res,
-            hasMore = offset + limit < count.scalar_one(),
+        final = SimpleListQueryResponse(
+            items = res,
+            hasMore = offset + limit < total,
+            total = total
         )
         return final
 
     @with_auto_session
     async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[Any]:  # not able to state the dynamic type self._metadata_type
-        return await self.resolve_query(request.offset, request.limit, lambda x: self._metadata_pydantic.model_validate(x.metadata_instance), request.includesDeleted, True)
+        return await self._resolve_query(
+            request.offset, request.limit,
+            lambda x: self._metadata_pydantic.model_validate(x.metadata_instance),
+            size_inferior_to=request.sizeInferiorTo, size_superior_to=request.sizeSuperiorTo,
+            includes_deleted=request.includesDeleted, includes_metadata=True
+        )
 
     @with_auto_session
     async def list_items_of_type(self, item_type: type[HashType | str | MetadataType | Any], request: SimpleListQueryRequest) -> \
@@ -121,9 +135,11 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         includes_mt = False
         if item_type == self._hash_type:
             attr_func = lambda x: self._hash_pydantic and self._hash_pydantic.model_validate(x.hash) or x.hash
-        elif item_type == self._metadata_type:
+        elif item_type == NoneType:  # self._metadata_type should not be known by the caller so a little shortcut here
             includes_mt = True
             attr_func = lambda x: x
+        elif item_type == int:
+            attr_func = lambda x: x.size
         elif item_type == str or item_type == ULID:
             attr_func = lambda x: x.ulid
         elif item_type == self._internal_metadata_type:
@@ -132,7 +148,11 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         else:
             raise NotImplementedError
 
-        return await self.resolve_query(request.offset, request.limit, attr_func, request.includesDeleted, includes_mt)
+        return await self._resolve_query(
+            request.offset, request.limit, attr_func,
+            size_inferior_to=request.sizeInferiorTo, size_superior_to=request.sizeSuperiorTo,
+            includes_deleted=request.includesDeleted, includes_metadata=includes_mt
+        )
 
 
 class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType]):
@@ -147,8 +167,7 @@ class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType])
     @asynccontextmanager
     async def _ensure_current_db(self):
         async with (
-            run_within_sqlalchemy() as db,
-            db,
+            run_within_sqlalchemy() as _,
         ):
             yield
 
@@ -171,11 +190,15 @@ if __name__ == '__main__':
             run_with_temporarily_persistent_mock_db_engine(echo=False),
             DatabaseRegistryInContext[bytes, M](hash_type=bytes, metadata_type=M) as mock
         ):
-            print(await mock.new_item(b'x', M(a=123)))
-            print(await mock.new_item(b'y', M(a=999)))
-            #print(await mock.list_items(SimpleListQueryRequest(limit=1)))
+            print(await mock.new_item(b'x', M(a=123), size_of_data=150))
+            print(await mock.new_item(b'y', M(a=999), size_of_data=10))
+            print(await mock.list_items(SimpleListQueryRequest(limit=1)))
+            print(await mock.list_items(SimpleListQueryRequest(limit=1, sizeInferiorTo=0x200)))
+            print(await mock.list_items(SimpleListQueryRequest(limit=1, sizeInferiorTo=100)))
             print(await mock.list_items_of_type(bytes, SimpleListQueryRequest()))
             print(await mock.list_items_of_type(str, SimpleListQueryRequest()))
+            print(await mock.list_items_of_type(int, SimpleListQueryRequest()))
+            print(await mock.list_items_of_type(NoneType, SimpleListQueryRequest()))
             await mock.delete_item(b'y')
             print(await mock.metadata_for_hash(b'y'))
             print(await mock.old_metadata_for_hash(b'y'))
