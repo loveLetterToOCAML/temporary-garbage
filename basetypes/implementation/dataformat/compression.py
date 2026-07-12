@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-
-from anyio.abc import ObjectReceiveStream
-
+from basetypes.implementation.dataformat.compression_protocols import CommonDataBufferSyncProcessing
 from basetypes.implementation.basetypes_match import DefaultBaseType
 
 from pydantic import BaseModel, Field, model_validator
 
-from typing import Literal, Any, Protocol, final
+from contextlib import asynccontextmanager
+from typing import Literal, Any
 from enum import Enum
-
-from basetypes.implementation.dataformat.compression_protocols import CommonDataBufferSyncProcessing
 
 
 class CompressionAbortReason(Enum):
@@ -37,8 +33,8 @@ class CompressionAlgorithmInstance(BaseModel):
 
 class DefaultCompressionParameters(BaseModel):
     compressionLevel: int = 6
-    withHistory: bool = False  # take advantages of dynamic window recomputation through time and emitted blocks
-    withChecksum: bool = True  # compute checksum of each block for basic verification
+    withHistory: bool = True  # take advantages of dynamic window recomputation through time and emitted blocks
+    withChecksum: bool = False  # compute checksum of each block for basic verification, at the cost of being potentially non-standard if not supported by the algorithm
 
 
 class GzipCompressionParameters(DefaultCompressionParameters):

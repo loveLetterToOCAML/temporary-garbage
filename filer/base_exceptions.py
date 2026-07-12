@@ -1,52 +1,62 @@
+from filer.filer_backend.utils_exn import PydanticException, SerialException
 from basetypes.implementation.basetypes_match import DefaultBaseType
 from filer.filer_type_registration import FilerInteractions
 from basetypes.ae_interaction import InteractionType
-
-from pydantic import BaseModel
 
 from enum import Enum
 
 
 class FilerExceptionType(Enum):
     NotExistingContent = 1
-    HashNotMatchingContent = 2
-    AlreadyUploadedContent = 3
-    NotEnoughSpaceRemaining = 4
-    OutOfSpaceConstraints = 5
-    AlreadyUploadedChunk = 6
-    BadChunkUploaded = 7
-    PermanentContent = 8
-    BadDeletionKey = 9
-    DeletionKeyRequired = 10
+    NotExistingPlaceholderForUpload = 2
+    HashNotMatchingContent = 3
+    AlreadyUploadedContent = 4
+    AlreadyUploadingContent = 5
+    NotEnoughSpaceRemaining = 6
+    OutOfSpaceConstraints = 7
+    AlreadyUploadedChunk = 8
+    BadChunkUploaded = 9
+    PermanentContent = 10
+    BadDeletionKey = 11
+    DeletionKeyRequired = 12
 
 
-class WithInputUlidAndHash(BaseModel):
+class PydanticFilerException(PydanticException):
+    pass
+
+class WithInputUlidAndHash(PydanticFilerException):
     inputUlid: DefaultBaseType.ULID | None = None
     inputHash: bytes | None = None
 
 class NotExistingContent(WithInputUlidAndHash):
-    hasExisted: bool
+    hasExisted: bool | None = None
+
+class NotExistingPlaceholderForUpload(WithInputUlidAndHash):
+    pass
 
 class HashNotMatchingContent(WithInputUlidAndHash):
     inputHash: bytes  # none is not an option there
     expectedHash: bytes
 
-class AlreadyUploadedContent(BaseModel):
-    ulidUploaded: DefaultBaseType.ULID
-    hashUploaded: bytes
+class AlreadyUploadedContent(PydanticFilerException):
+    existingUlid: DefaultBaseType.ULID | None
+    hashAttempted: bytes
 
-class NotEnoughSpaceRemaining(BaseModel):
+class AlreadyUploadingContent(PydanticFilerException):
+    hashUploading: bytes
+
+class NotEnoughSpaceRemaining(PydanticFilerException):
     requestedSize: int
     remainingSize: int
 
-class OutOfSpaceConstraints(BaseModel):
+class OutOfSpaceConstraints(PydanticFilerException):
     requestedSize: int
     maximumSize: int
 
-class AlreadyUploadedChunk(BaseModel):
+class AlreadyUploadedChunk(PydanticFilerException):
     chunkIndex: int
 
-class BadChunkUploaded(BaseModel):
+class BadChunkUploaded(PydanticFilerException):
     chunkIndex: int
     expectedSize: int
     receivedSize: int
@@ -73,3 +83,42 @@ FilerExceptions.register_serialization_leaf(FilerExceptionType.AlreadyUploadedCh
 FilerExceptions.register_serialization_leaf(FilerExceptionType.BadChunkUploaded, BadChunkUploaded)
 FilerExceptions.register_serialization_leaf(FilerExceptionType.BadDeletionKey, BadDeletionKey)
 FilerExceptions.register_serialization_leaf(FilerExceptionType.DeletionKeyRequired, DeletionKeyRequired)
+
+
+class FilerSerialException(SerialException):
+
+    def __init__(self, serialized: PydanticFilerException):
+        super().__init__(serialized, 'FilerException::')
+
+
+if __name__ == '__main__':
+    try:
+        raise FilerSerialException(
+            NotExistingContent(
+                hasExisted=True,
+                inputHash=b'x'
+            )
+        )
+    except Exception as e:
+        print(e)
+
+    try:
+        raise FilerSerialException(
+            OutOfSpaceConstraints(
+                requestedSize=13,
+                maximumSize=14
+            )
+        )
+    except Exception as e:
+        print(e)
+
+    try:
+        raise FilerSerialException(
+            NotExistingContent(
+                hasExisted=False,
+                inputHash=b'b'
+            )
+        )
+    except Exception as e:
+        print(e)
+        raise

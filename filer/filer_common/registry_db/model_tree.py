@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from baseimplems.persistence.model_utils.high_order_sqlalchemy_registry import register_sqlalchemy_type, \
     default_sqlalchemy_classname_keying
-from baseimplems.persistence.sqlalchemy_database import with_auto_session_kwargs, with_auto_session
+from baseimplems.persistence.sqlalchemy_database import with_auto_session_kwargs, with_auto_session, \
+    with_current_session_kwargs
 from baseimplems.persistence.model_utils.model_utils_common import TWithID, WithUniqueName, WithID
 from baseimplems.persistence.mixins import BaseMixins, commit_and_rollback_if_exception
 from baseimplems.persistence.model_utils.model_utils_time import CreatedModifiedAt
@@ -183,7 +184,7 @@ def TREE(NodeAlchemyBaseType: TWithID, LeafAlchemyBaseType: TWithID | None = Non
             self.check_initialized_entries()
             return self._roots
 
-        @with_auto_session_kwargs
+        @with_current_session_kwargs
         async def get_root(self, create=True, *, session: AsyncSession):
             self.check_initialized_entries()
             if not self._roots and create:
@@ -202,7 +203,7 @@ def TREE(NodeAlchemyBaseType: TWithID, LeafAlchemyBaseType: TWithID | None = Non
             self.check_initialized_entries()
             return self._entries_per_id[index]
 
-        @with_auto_session_kwargs
+        @with_current_session_kwargs
         async def add_child(self, node: _TREE_ENTRY, child_node: NodeAlchemyBaseType, *, session: AsyncSession):
             self.check_initialized_entries()
             child = _TREE_ENTRY(metadata_id=self.metadata.id, parent_id=node.id, node=child_node)
@@ -213,7 +214,7 @@ def TREE(NodeAlchemyBaseType: TWithID, LeafAlchemyBaseType: TWithID | None = Non
             self._tree.setdefault(child.id, [])
             return child
 
-        @with_auto_session_kwargs
+        @with_current_session_kwargs
         async def add_leaf(self, node: _TREE_ENTRY, child_leaf: LeafType, *, session: AsyncSession):
             self.check_initialized_entries()
             child = _TREE_ENTRY(metadata_id=self.metadata.id, parent_id=node.id, leaf=child_leaf)
@@ -228,8 +229,8 @@ def TREE(NodeAlchemyBaseType: TWithID, LeafAlchemyBaseType: TWithID | None = Non
             self.check_initialized_entries()
             return self._tree.get(node.id, [])
 
-        @with_auto_session
-        async def delete_from(self, node: _TREE_ENTRY, allow_root=False):
+        @with_current_session_kwargs
+        async def delete_from(self, node: _TREE_ENTRY, allow_root=False, *, session):
             self.check_initialized_entries()
             cur_entries = [node]
             while cur_entries:

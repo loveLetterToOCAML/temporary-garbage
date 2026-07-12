@@ -1,59 +1,48 @@
-"""
-Compression algorithm wrappers with full Pydantic parameter models.
-
-Algorithms:
-  - GzipCompressor   — balanced (gzip / zlib, stdlib)
-  - LZ4Compressor    — optimised for speed   (lz4 package)
-  - ZstdCompressor   — optimised for ratio   (zstandard package)
-"""
-
 from __future__ import annotations
 
-import gzip
-import time
-import zlib
-from contextlib import asynccontextmanager
-
-from anyio import AsyncContextManagerMixin
-from pydantic import BaseModel, Field
-
-from baseimplems.anyio_utils import NotInAsyncContextManager
 from basetypes.implementation.dataformat.compression_protocols import StreamCompressorProtocol, \
     StreamDecompressorProtocol
+from basetypes.implementation.dataformat.compression import GzipCompressionParameters
+from baseimplems.anyio_utils import NotInAsyncContextManager
+
+from anyio import AsyncContextManagerMixin
+
+from contextlib import asynccontextmanager
+import zlib
 
 
-class InternalGzipCompressionParameters(BaseModel):
-    compressionLevel: int = Field(
-        default=6,
-        ge=0, le=9,
-        description='zlib compression level (0=none ... 9=max). Default to 6',
-    )
-    wbits: int = Field(
-        default=31,
-        description=(
-            'Window size bits for zlib.compressobj. gzip format=31, zlib format=15, raw deflate=-15'
-        ),
-    )
-    memLevel: int = Field(
-        default=8,
-        ge=1, le=9,
-        description='zlib internal memory usage (1=min ... 9=max). Default to 8',
-    )
-    strategy: int = Field(
-        default=0,
-        description=(
-            'zlib strategy: Z_DEFAULT_STRATEGY=0, Z_FILTERED=1, Z_HUFFMAN_ONLY=2, Z_RLE=3, Z_FIXED=4'
-        ),
-    )
+#class InternalGzipCompressionParameters(BaseModel):
+#    compressionLevel: int = Field(
+#        default=6,
+#        ge=0, le=9,
+#        description='zlib compression level (0=none ... 9=max). Default to 6',
+#    )
+#    wbits: int = Field(
+#        default=31,
+#        description=(
+#            'Window size bits for zlib.compressobj. gzip format=31, zlib format=15, raw deflate=-15'
+#        ),
+#    )
+#    memLevel: int = Field(
+#        default=8,
+#        ge=1, le=9,
+#        description='zlib internal memory usage (1=min ... 9=max). Default to 8',
+#    )
+#    strategy: int = Field(
+#        default=0,
+#        description=(
+#            'zlib strategy: Z_DEFAULT_STRATEGY=0, Z_FILTERED=1, Z_HUFFMAN_ONLY=2, Z_RLE=3, Z_FIXED=4'
+#        ),
+#    )
 
 
 class Gzip(AsyncContextManagerMixin):
     """Gzip compressor / decompressor — balanced speed / ratio using Python stdlib."""
 
-    def __init__(self, params):
+    def __init__(self, params: GzipCompressionParameters):
         self._compress_obj = self._decompress_obj = None
         self._params = params
-        self._wbits = -15
+        self._wbits = -15  # raw deflate
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
@@ -94,11 +83,12 @@ class GzipDecompressor(Gzip, StreamDecompressorProtocol):
 
 
 if __name__ == '__main__':
-    from basetypes.implementation.dataformat.compression import DefaultCompressionParameters
+    import random
+    import string
     import anyio
 
     async def perform():
-        g = GzipCompressor(DefaultCompressionParameters())
+        g = GzipCompressor(GzipCompressionParameters())
         async with g:
             d1 = g.compress(b'andiaolzopammalp')
             print(d1)
@@ -106,11 +96,20 @@ if __name__ == '__main__':
             print(d2)
             print(d1+d2)
 
-        g = GzipDecompressor(DefaultCompressionParameters())
+        g = GzipDecompressor(GzipCompressionParameters())
         async with g:
             d1 = g.decompress(d2[:0x8])
             print(d1)
             d2 = g.decompress_and_flush(d2[0x8:])
             print(d2)
+
+        g = GzipCompressor(GzipCompressionParameters())
+        async with g:
+            for i in range(0x100):
+                t = bytes(map(ord, random.choices(string.ascii_letters, k=0x10000)))
+                d = g.compress(t)
+                if d:
+                    print("GOT D", i, len(d))
+            print("final D", len(g.compress_and_flush(t)))
 
     anyio.run(perform)

@@ -11,7 +11,7 @@ class FilerBackendInteractionConfig(BaseModel):
 class FilerBackendConfig(BaseModel):
     needDeletionConfirm: bool = True
     interactionConfig: FilerBackendInteractionConfig = FilerBackendInteractionConfig()
-    storageType: FSFiler | SQLFiler | InMemoryFiler = FSFiler()
+    storageType: FSFiler | SQLFiler | InMemoryFiler | GitFiler | S3Filer = FSFiler()
 
 
 FilerBackendConfigContext = FilerConfigContext.register_child(

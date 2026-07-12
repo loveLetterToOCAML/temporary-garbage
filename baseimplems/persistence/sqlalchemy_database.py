@@ -43,18 +43,10 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
             self._ready.set()
 
     @asynccontextmanager
-    async def session(self, force_new: bool = True) -> AsyncIterator[AsyncSession]:
+    async def session(self) -> AsyncIterator[AsyncSession]:
         if not self._session_factory:
             raise NotInAsyncContextManager('session', 'SqlalchemyBaseHandler')
         await self._ensure_schema()
-
-        if self._session and not force_new:
-            try:
-                yield self._session
-            finally:
-                from baseimplems.persistence.mixins import commit_and_rollback_if_exception
-                await commit_and_rollback_if_exception(self._session)
-                return
 
         async with self._session_factory() as self._session:
             prev = current_sqlalchemy_session.set(self._session)
@@ -100,29 +92,21 @@ run_within_session = run_within(AsyncSession, current_sqlalchemy_session)
 def with_auto_session(f):
     @wraps(f)
     async def sub(*args, **kwargs):
-        async with sqlalchemy_base.session(force_new=False):
+        async with sqlalchemy_base.session():
             return await f(*args, **kwargs)
     return sub
 
 def with_auto_session_kwargs(f):
     @wraps(f)
     async def sub(*args, **kwargs):
-        async with sqlalchemy_base.session(force_new=False) as session:
-            return await f(*args, **kwargs, session=session)
-    return sub
-
-def with_auto_new_session(f):
-    @wraps(f)
-    async def sub(*args, **kwargs):
-        async with sqlalchemy_base.session():
-            return await f(*args, **kwargs)
-    return sub
-
-def with_auto_new_session_kwargs(f):
-    @wraps(f)
-    async def sub(*args, **kwargs):
         async with sqlalchemy_base.session() as session:
             return await f(*args, **kwargs, session=session)
+    return sub
+
+def with_current_session_kwargs(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        return await f(*args, **kwargs, session=current_sqlalchemy_session.get())
     return sub
 
 
