@@ -17,7 +17,7 @@ class FilerBackendInMemParameters(BaseModel):
     maxIntervalParts: int = 0x10000
 
 
-def check_final_content_hash(expected_hash: Hashed, chunk_gen: Callable[[], Iterator[bytes]]):
+def check_final_content_hash_exn(expected_hash: Hashed, chunk_gen: Callable[[], Iterator[bytes]]):
     with expected_hash.compute_new() as h:
         for chunk in chunk_gen():
             h.update(chunk)
@@ -91,14 +91,14 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
             self._temporaryfiles_per_hash[locator] = BytesIntervalUnion(total_size)
             self._current_size_max += total_size
 
-    async def upload_chunk_at_exn(self, locator: Hashed, offset: int, data: bytes):
+    async def upload_chunk_at_exn(self, locator: Hashed, offset: int, data: bytes) -> int:
         if locator not in self._temporaryfiles_per_hash:
             raise FilerSerialException(
                 NotExistingPlaceholderForUpload(
                     inputHash=locator.hash,
                 )
             )
-        self._temporaryfiles_per_hash[locator].union_from(offset, data)
+        written = self._temporaryfiles_per_hash[locator].union_from(offset, data)
         if self._temporaryfiles_per_hash[locator].number_parts > self._params.maxIntervalParts:
             raise SerialException(
                 ExternalFailure(
@@ -106,10 +106,11 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
                     humanMessage=f"Too much parts encountered during upload: {self._temporaryfiles_per_hash[locator].number_parts} instead of max {self._params.maxIntervalParts} expected",
                 )
             )
+        return written
 
     async def upload_terminate_at_exn(self, locator: Hashed):
         if self._temporaryfiles_per_hash[locator].is_complete:
-            check_final_content_hash(locator, self._temporaryfiles_per_hash[locator].complete_data_gen_exn)
+            check_final_content_hash_exn(locator, self._temporaryfiles_per_hash[locator].complete_data_gen_exn)
             async with self._lock:
                 self._files_per_hash[locator] = self._temporaryfiles_per_hash[locator].complete_data_exn()
                 self._current_size += len(self._files_per_hash[locator])

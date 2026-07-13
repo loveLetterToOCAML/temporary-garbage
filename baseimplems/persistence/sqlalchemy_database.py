@@ -103,6 +103,14 @@ def with_auto_session_kwargs(f):
             return await f(*args, **kwargs, session=session)
     return sub
 
+def with_auto_session_kwargs_gen(f):
+    @wraps(f)
+    async def sub(*args, **kwargs):
+        async with sqlalchemy_base.session() as session:
+            async for data in f(*args, **kwargs, session=session):
+                yield data
+    return sub
+
 def with_current_session_kwargs(f):
     @wraps(f)
     async def sub(*args, **kwargs):

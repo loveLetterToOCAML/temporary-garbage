@@ -52,17 +52,6 @@ class StreamConstraints(BaseModel):
     resetFaultsDelaySeconds: float
 
 
-class FilerBackendInMemConfig(BaseModel):
-    allowedMemory: int = 0x40000000
-    streamConstraints: StreamConstraints = StreamConstraints(
-        minBytesPerSecond=1000000
-    )
-
-
-class FilerBackendInMemParameters(ExecutionSystemParameters):
-    backendConfig: FilerBackendInMemConfig
-
-
 class InMemFilerInternalState:
 
     def __init__(self, max_simultanous_uploads=0x1000, max_simultanous_downloads=0x1000):

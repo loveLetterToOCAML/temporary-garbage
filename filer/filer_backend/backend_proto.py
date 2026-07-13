@@ -27,7 +27,7 @@ class EffectfulBackend(Protocol[ExternalResourceLocatorType, BackendFailureType]
     async def prepare_placeholder_at_exn(self, locator: ExternalResourceLocatorType, total_size: int):
         ...
 
-    async def upload_chunk_at_exn(self, locator: ExternalResourceLocatorType, offset: int, data: bytes):
+    async def upload_chunk_at_exn(self, locator: ExternalResourceLocatorType, offset: int, data: bytes) -> int:
         ...
 
     async def upload_terminate_at_exn(self, locator: ExternalResourceLocatorType):
@@ -69,7 +69,7 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
         return await self._effectful_backend.prepare_placeholder_at_exn(locator, total_size)
 
     @final
-    async def upload_chunk_for_hash_exn(self, hash: HashType, offset: int, data: bytes):
+    async def upload_chunk_for_hash_exn(self, hash: HashType, offset: int, data: bytes) -> int:
         locator = self.resource_locator_from_hash(hash)
         return await self._effectful_backend.upload_chunk_at_exn(locator, offset, data)
 

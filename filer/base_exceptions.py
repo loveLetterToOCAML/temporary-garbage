@@ -42,6 +42,7 @@ class AlreadyUploadedContent(PydanticFilerException):
     existingUlid: DefaultBaseType.ULID | None
     hashAttempted: bytes
 
+# TODO: remove this and act in consequence, because one could block any upload targeting a given hash with this
 class AlreadyUploadingContent(PydanticFilerException):
     hashUploading: bytes
 

@@ -132,14 +132,14 @@ class MixedHashProtocol(SerializableHash, HashContextProtocol):
 
 
 def hash_protocol_for_type(hash_instance: HashAlgorithmInstance) -> HashContextProtocol:
-    match hash_instance:
-        case SHA256():
+    match hash_instance.type:
+        case HashAlgorithm.SHA256:
             return CommonHashProtocol(hash_instance, sha256)
-        case SHA512():
+        case HashAlgorithm.SHA512:
             return CommonHashProtocol(hash_instance, sha512)
-        case MixedMd5Sha256():
+        case HashAlgorithm.MIXED_MD5_SHA256:
             return MixedHashProtocol(hash_instance, md5, sha256)
-        case MixedSha256Sha512():
+        case HashAlgorithm.MIXED_SHA256_SHA512:
             return MixedHashProtocol(hash_instance, sha256, sha512)
         case _:
             raise NotImplementedError

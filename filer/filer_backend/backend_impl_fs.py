@@ -67,12 +67,13 @@ class EffectfulFsBackendSimple(EffectfulBackend[str, BackendFailure]):
         async with await anyio.open_file(placeholder_path, "wb") as f:
             await f.truncate(total_size)
 
-    async def upload_chunk_at_exn(self, locator: str, offset: int, data: bytes):
+    async def upload_chunk_at_exn(self, locator: str, offset: int, data: bytes) -> int:
         async with (
             await anyio.open_file(self._placeholder_path_for(locator), "r+b") as f
         ):
             await f.seek(offset)
             await f.write(data)
+            return len(data)
 
     async def upload_terminate_at_exn(self, locator: str):
         os.rename(self._placeholder_path_for(locator), locator)
