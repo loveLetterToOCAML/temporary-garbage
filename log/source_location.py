@@ -132,13 +132,13 @@ def frame_traceback(frame: FrameType, limit: int | None = None) -> list[str]:
         lambda WriteSupport: traceback.print_stack(frame, limit, file=WriteSupport)
     )
     return lines
-
-try:
-    raise Exception("aaa", 1)
-except Exception as e:
-    print(sys.exc_info())
-    print(exception_info_traceback_as_str(sys.exc_info()))
-    print(current_frame())
-
-    print('\n'.join(frame_traceback(current_frame())))
+#
+#try:
+#    raise Exception("aaa", 1)
+#except Exception as e:
+#    print(sys.exc_info())
+#    print(exception_info_traceback_as_str(sys.exc_info()))
+#    print(current_frame())
+#
+#    print('\n'.join(frame_traceback(current_frame())))
 

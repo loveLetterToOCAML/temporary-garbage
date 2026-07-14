@@ -1,123 +1,165 @@
-from basetypes.implementation.dataformat.hashed import Hashed
 from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholderForUpload, \
-    NotExistingContent, AlreadyUploadedContent
+    NotExistingContent
+from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance, \
+    check_valid_hash_for_type
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
 from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.effectful_fs import FsSideEffect, FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
+    FsReadContent, FsDelete, FsReadMetadata, FsList, ExceptionSideEffect
+from filer.filer_backend.utils_exn import SerialException
 
 from pydantic import BaseModel
 from anyio import open_file
 
 from typing import AsyncIterator, Type
+from functools import wraps
 from pathlib import Path
 import os
 
-from filer.filer_backend.utils_exn import SerialException
+from log.logging_context import logger_for
+from policy.log import run_with_log_policy, LogLevel
+
+
+def none_if_exception(f):
+    @wraps(f)
+    def sub(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except:
+            return
+    return sub
 
 
 class FilerBackendFsParameters(BaseModel):
     basePath: Path
     expectsOnlyRightFormatted: bool = True
-    allowRenamingOfBadlyFormatted: bool = True
-    #genericParams: GenericBackendParams
+    # if allowing any content with expectsOnlyRightFormatted=False, this will lead to renaming of all the files under web-root with the hash of the file content if True
+    allowRenamingOfBadlyFormatted: bool = False
 
 
-class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, str, BackendFailure]):
+class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure]):
 
     def __init__(self, params: FilerBackendFsParameters, ChosenImplem: Type | None = None):
         self._params = params
         self._implem = (ChosenImplem or EffectfulFsBackendSimple)(self._params)
 
-    @property
-    def _effectful_backend(self) -> EffectfulBackend[str, BackendFailure]:
-        return self._implem
-
-    def hash_from_resource_locator(self, locator: str) -> Hashed | None:
+    @classmethod
+    @none_if_exception
+    def hash_from_resource_locator(self, locator: Path) -> Hashed | None:
+        fname = locator.name.split('.')[0]
+        alg, hash_hex = fname.split('-')
+        hash_algorithm_type = HashAlgorithm(int(alg))
+        hash_algorithm = HashAlgorithmInstance(type=hash_algorithm_type)
+        hash_raw = bytes.fromhex(hash_hex)
+        if not check_valid_hash_for_type(hash_algorithm, hash_raw):
+            return
         return Hashed(
-            hashAlgorithm=self._params.hashAlgorithm,
-            hash=bytes.fromhex(locator.split(os.path.sep)[-1])
+            hashAlgorithm=hash_algorithm,
+            hash=hash_raw
         )
 
-    def resource_locator_from_hash(self, hash: Hashed) -> str:
-        return os.path.join(self._params.basePath, hash.hash.hex())
+    @property
+    def _effectful_backend(self) -> EffectfulBackend[Path, BackendFailure]:
+        return self._implem
+
+    def resource_locator_from_hash(self, hash: Hashed) -> Path:
+        return Path(
+            self._params.basePath /
+            f"{hash.hashAlgorithm.type.value}-{hash.hash.hex()}"
+        )
 
 
-class EffectfulFsBackendSimple(EffectfulBackend[str, BackendFailure]):
+class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
     def __init__(self, params):
+        self._current_placeholder_index = 0
         self._params = params
+        self._fs_lgr = logger_for(__name__)  # TODO: shouldn't it be resolved during context management entering?
 
-    def _placeholder_path_for(self, path):
-        return f"{path}.placeholder"
+    def _placeholder_path_for(self, path, placeholder_index: int):
+        return f"{path}.{placeholder_index}.placeholder"
 
-    async def size_of_content_at_exn(self, locator: str) -> int:
+    async def size_of_content_at_exn(self, locator: Path) -> int:
         async with await open_file(locator, 'r') as f:
             await f.seek(0, os.SEEK_END)
             return await f.tell()
 
-    async def prepare_placeholder_at_exn(self, locator: str, total_size: int):
-        if os.path.isfile(locator):
-            raise FilerSerialException(
-                AlreadyUploadedContent(existingUlid=None, hashAttempted=bytes.fromhex(locator.split(os.path.sep)[-1]))  # arf
-            )
-        placeholder_path = self._placeholder_path_for(locator)
+    async def prepare_placeholder_at_exn(self, locator: Path, placeholder_index: int, total_size: int):
+        # below should be handle by the Safe Backend
+        #if os.path.isfile(locator):
+        #    raise FilerSerialException(
+        #        AlreadyUploadedContent(existingUlid=None, hashAttempted=bytes.fromhex(locator.name))
+        #    )
+        placeholder_path = self._placeholder_path_for(locator, placeholder_index)
         if os.path.isfile(placeholder_path):
             raise FilerSerialException(
                 AlreadyUploadingContent(hashUploading=bytes.fromhex(locator.split(os.path.sep)[-1]))  # arf
             )
         async with await anyio.open_file(placeholder_path, "wb") as f:
+            self._fs_lgr.info(f"Placeholder creation {placeholder_path} and reservation of {total_size} bytes",
+                              fs_side_effect_for(FsCreateReserve(reservedBytes=total_size), placeholder_path))
             await f.truncate(total_size)
 
-    async def upload_chunk_at_exn(self, locator: str, offset: int, data: bytes) -> int:
+    async def upload_chunk_at_exn(self, locator: Path, placeholder_index: int, offset: int, data: bytes) -> int:
+        path = self._placeholder_path_for(locator, placeholder_index)
         async with (
-            await anyio.open_file(self._placeholder_path_for(locator), "r+b") as f
+            await anyio.open_file(path, "r+b") as f
         ):
             await f.seek(offset)
             await f.write(data)
+            self._fs_lgr.info(f"Placeholder write at {path} from {offset} ({len(data)} bytes)",
+                              fs_side_effect_for(FsUpdateContent(fromOffset=offset, sizeUpdated=len(data)), path))
             return len(data)
 
-    async def upload_terminate_at_exn(self, locator: str):
-        os.rename(self._placeholder_path_for(locator), locator)
+    async def upload_terminate_at_exn(self, locator: Path, placeholder_index: int):
+        path = self._placeholder_path_for(locator, placeholder_index)
+        os.rename(path, locator)
+        self._fs_lgr.info(f"Upload finished, placeholder being rewritten from {path} to {locator}",
+                          fs_side_effect_for(FsMove(targetPath=f"{locator}"), path))
 
-    async def download_chunk_from_exn(self, locator: str, offset: int, size: int) -> bytes:
+    async def download_chunk_from_exn(self, locator: Path, offset: int, size: int) -> bytes:
         async with (
             await anyio.open_file(locator, "rb") as f
         ):
             await f.seek(offset)
-            return await f.read(size)
+            result = await f.read(size)
+            self._fs_lgr.info(f"File read at {locator} from {offset} ({size} bytes)",
+                              fs_side_effect_for(FsReadContent(fromOffset=offset, expectedSizeToRead=size, sizeRead=len(result)), locator))
+            return result
 
-    async def delete_resource_at_exn(self, locator: str, placeholder: bool = False):
-        if not placeholder:
+    async def delete_resource_at_exn(self, locator: Path, placeholder_index: int = -1):
+        if placeholder_index < 0:
             os.unlink(locator)
+            self._fs_lgr.info(f"Deleting base resource at {locator}", fs_side_effect_for(FsDelete(), locator))
         else:
-            os.unlink(self._placeholder_path_for(locator))
+            path = self._placeholder_path_for(locator, placeholder_index)
+            os.unlink(path)
+            self._fs_lgr.info(f"Deleting placeholder resource at {path}", fs_side_effect_for(FsDelete(), path))
 
-    async def _list_resources_exn(self) -> AsyncIterator[str]:
+    async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:
         for entry in os.scandir(self._params.basePath):
             if os.path.isfile(entry.path):
-                yield entry.path
+                path = Path(entry.path)
+                if self._params.expectsOnlyRightFormatted:
+                    h = EffectfulFilerFsBackend.hash_from_resource_locator(path)
+                    if h:
+                        yield path
+                        continue
+                    print("BAD FILE FOUND", path)
+                    if self._params.allowRenamingOfBadlyFormatted:
+                        print("WILL RENAME", path)
+                    continue
+                yield path
+        self._fs_lgr.info(f"Listed resource at {self._params.basePath}", fs_side_effect_for(FsList(), self._params.basePath))
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+    def _exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,
                 humanMessage=exn.serialized.humanMessage or 'FilerException::EffectfulFilerFsBackend exception',
                 retryable=False
             )
-        if isinstance(exn, FileNotFoundError):
-            hash = bytes.fromhex(exn.filename.split(os.path.sep)[-1].split('.placeholder')[0])
-            if 'placeholder' in exn.filename:
-                ser_exn = NotExistingPlaceholderForUpload(
-                    inputHash=hash,
-                )
-            else:
-                ser_exn = NotExistingContent(
-                    inputHash=hash,
-                )
-            return BackendFailure(
-                failure=ser_exn,
-                humanMessage='FilerException::EffectfulFilerFsBackend::NotFound',
-                retryable=False
-            )
+
         if isinstance(exn, PermissionError):
             return BackendFailure(
                 failure=ExternalFailure(externalFailureType=ExternalFailureType.ForbiddenError),
@@ -125,12 +167,39 @@ class EffectfulFsBackendSimple(EffectfulBackend[str, BackendFailure]):
                 retryable=False,
                 originalException=exn
             )
+
+        try:
+            if isinstance(exn, FileNotFoundError):
+                path = Path(exn.filename)
+                hash = EffectfulFilerFsBackend.hash_from_resource_locator(path)
+                if 'placeholder' in exn.filename:
+                    ser_exn = NotExistingPlaceholderForUpload(
+                        inputHash=hash.hash,
+                        placeholderIndex=int(path.name.split('.')[1])
+                    )
+                else:
+                    ser_exn = NotExistingContent(
+                        inputHash=hash.hash,
+                    )
+                return BackendFailure(
+                    failure=ser_exn,
+                    humanMessage='FilerException::EffectfulFilerFsBackend::NotFound',
+                    retryable=False
+                )
+        except Exception as exn:
+            pass
+
         return BackendFailure(
             failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
             humanMessage='FilerException::EffectfulFilerFsBackend::InternalError',
             retryable=False,
             originalException=exn
         )
+
+    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+        processed = self._exception_to_serialized_failure(exn)
+        self._fs_lgr.exception(f"Encountered exception {processed}", ExceptionSideEffect(serializedException=processed))
+        return processed
 
 
 if __name__ == '__main__':
@@ -146,22 +215,34 @@ if __name__ == '__main__':
         hash = h.to_hashed()
 
     async def main():
-        async with enclose_within_temporary_dir_interactive_mock() as main_dir:
+        async with (
+            run_with_log_policy(
+                logLevel=LogLevel.INFO,
+            ) as dyn_lp,
+            enclose_within_temporary_dir_interactive_mock() as main_dir
+        ):
+            print(dyn_lp)
             ebim = EffectfulFilerFsBackend(FilerBackendFsParameters(basePath=main_dir))
 
-            await ebim.prepare_placeholder_for_hash_exn(hash, len(data))
+            placeholder_idx = 0
+            await ebim.prepare_placeholder_for_hash_exn(hash, placeholder_idx, len(data))
             for i in range(0, 0x1000, 0x10):
-                await ebim.upload_chunk_for_hash_exn(hash, i, data[i:i+0x10])
-            await ebim.upload_terminate_for_hash_exn(hash)
+                await ebim.upload_chunk_for_hash_exn(hash, placeholder_idx, i, data[i:i+0x10])
+            await ebim.upload_terminate_for_hash_exn(hash, placeholder_idx)
 
-            print(await ebim.upload_chunk_for_hash(hash, i, data[i:i + 0x10]))
-            await ebim.prepare_placeholder_for_hash(hash, len(data))
+            print(await ebim.upload_chunk_for_hash(hash, placeholder_idx, i, data[i:i + 0x10]))
+            # await ebim.prepare_placeholder_for_hash(hash, placeholder_idx, len(data))
 
-            async for r in ebim.list_resources_exn():
+            async for r in ebim.list_resources_reorganize_exn():
                 print(r)
 
             downloaded = await ebim.download_chunk_for_hash(hash, 0, 0x10000)
-            print(len(downloaded))
+            print(downloaded)
+
+            print("waiting 15s, please put random things in temp dir, it will relist")
+            await anyio.sleep(15)
+            async for r in ebim.list_resources_reorganize_exn():
+                print(r)
 
         print(await ebim.delete_content(hash))
         print(await ebim.download_chunk_for_hash(hash, 0, 0x10000))

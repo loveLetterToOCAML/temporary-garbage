@@ -108,7 +108,7 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[HashedWithIndex, TemporaryC
         return (await session.execute(stmt)).scalar_one()
 
     @with_auto_session_kwargs
-    async def prepare_placeholder_at_exn(self, locator: TemporaryContentForHash, total_size: int, *, session: AsyncSession):
+    async def prepare_placeholder_at_exn(self, locator: TemporaryContentForHash, placeholder_index: int, total_size: int, *, session: AsyncSession):
         if (await session.execute(self._filter_by_hash(select(ContentForHash), locator))).one_or_none():
             raise FilerSerialException(
                 AlreadyUploadedContent(existingUlid=None, hashAttempted=locator.hash)
@@ -138,7 +138,7 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[HashedWithIndex, TemporaryC
         return {(t[0], t[1]): t[2] for t in await session.execute(query)}
 
     @with_auto_session_kwargs
-    async def upload_chunk_at_exn(self, locator: TemporaryContentForHash, offset: int, data: bytes, *, session: AsyncSession) -> int:
+    async def upload_chunk_at_exn(self, locator: TemporaryContentForHash, placeholder_index: int, offset: int, data: bytes, *, session: AsyncSession) -> int:
         current_temporary_file = (
             await session.execute(self._filter_temporary_by_hash(select(TemporaryContentForHash), locator))
         ).scalar_one()
@@ -213,7 +213,7 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[HashedWithIndex, TemporaryC
         await session.execute(delete(TemporaryContentForHash).where(TemporaryContentForHash.id == locator.id))
 
     @with_auto_session_kwargs
-    async def upload_terminate_at_exn(self, locator: TemporaryContentForHash, *, session: AsyncSession):
+    async def upload_terminate_at_exn(self, locator: TemporaryContentForHash, placeholder_index: int, *, session: AsyncSession):
         current_temporary_file = (
             await session.execute(self._filter_temporary_by_hash(select(TemporaryContentForHash), locator))
         ).scalar_one()
@@ -241,14 +241,14 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[HashedWithIndex, TemporaryC
         return (await session.execute(stmt)).scalar_one()
 
     @with_auto_session_kwargs
-    async def delete_resource_at_exn(self, locator: TemporaryContentForHash, placeholder: bool = False, *, session: AsyncSession):
+    async def delete_resource_at_exn(self, locator: TemporaryContentForHash, placeholder_index: int = -1, *, session: AsyncSession):
         if not placeholder:
             await session.execute(delete(ContentForHash).where(ContentForHash.hash == locator.hash))
         else:
             await session.execute(delete(TemporaryContentForHash).where(TemporaryContentForHash.hash == locator.hash))
 
     @with_auto_session_kwargs_gen
-    async def _list_resources_exn(self, *, session: AsyncSession) -> AsyncIterator[TemporaryContentForHash]:
+    async def _list_resources_reorganize_exn(self, *, session: AsyncSession) -> AsyncIterator[TemporaryContentForHash]:
         for hash, hash_type in (await session.execute(select(ContentForHash.hash, ContentForHash.hash_type))):
             yield TemporaryContentForHash(
                 hash=hash,
@@ -308,21 +308,20 @@ if __name__ == '__main__':
         ):
             ebim = EffectfulFilerSqlBackend()
 
-            ph = await ebim.prepare_placeholder_for_hash_exn(hash, len(data))
-            print(ph)
-            hash.index = ph.id
+            placeholder_idx = 0
+            await ebim.prepare_placeholder_for_hash_exn(hash, placeholder_idx, len(data))
             for i in range(0, 0x1000, 0x10):
-                await ebim.upload_chunk_for_hash_exn(hash, i, data[i:i+0x10])
+                await ebim.upload_chunk_for_hash_exn(hash, placeholder_idx, i, data[i:i+0x10])
             print("[+] Check now, upload chunks finished")
             await anyio.sleep(10)
-            await ebim.upload_terminate_for_hash_exn(hash)
+            await ebim.upload_terminate_for_hash_exn(hash, placeholder_idx)
             print("[+] Check now, chunks should be deleted and real content obtained")
             await anyio.sleep(10)
 
             print(await ebim.upload_chunk_for_hash(hash, i, data[i:i + 0x10]))
-            await ebim.prepare_placeholder_for_hash(hash, len(data))
+            await ebim.prepare_placeholder_for_hash(hash, placeholder_idx, len(data))
 
-            async for r in ebim.list_resources_exn():
+            async for r in ebim.list_resources_reorganize_exn():
                 print(r)
 
             downloaded = await ebim.download_chunk_for_hash(hash, 0, 0x10000)
@@ -333,7 +332,8 @@ if __name__ == '__main__':
             print(await ebim.delete_content(hash))
             print(await ebim.download_chunk_for_hash(hash, 0, 0x10000))
 
-            ph = await ebim.prepare_placeholder_for_hash_exn(hash, len(data))
+            ph = 0
+            await ebim.prepare_placeholder_for_hash_exn(hash, ph, len(data))
             print(ph)
             hash.index = ph.id
             s = 0

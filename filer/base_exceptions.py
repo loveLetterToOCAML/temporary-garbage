@@ -32,7 +32,7 @@ class NotExistingContent(WithInputUlidAndHash):
     hasExisted: bool | None = None
 
 class NotExistingPlaceholderForUpload(WithInputUlidAndHash):
-    pass
+    placeholderIndex: int
 
 class HashNotMatchingContent(WithInputUlidAndHash):
     inputHash: bytes  # none is not an option there
@@ -45,6 +45,7 @@ class AlreadyUploadedContent(PydanticFilerException):
 # TODO: remove this and act in consequence, because one could block any upload targeting a given hash with this
 class AlreadyUploadingContent(PydanticFilerException):
     hashUploading: bytes
+    placeholderIndex: int
 
 class NotEnoughSpaceRemaining(PydanticFilerException):
     requestedSize: int

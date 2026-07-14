@@ -1,9 +1,9 @@
-from pydantic import BaseModel
-
 from typing import Protocol, final, Iterator, Type, Callable, Any, Literal
 from hashlib import sha256, sha512, md5
 from contextlib import contextmanager
 from enum import Enum
+
+from pydantic import BaseModel
 
 
 class HashAlgorithm(Enum):
@@ -141,6 +141,20 @@ def hash_protocol_for_type(hash_instance: HashAlgorithmInstance) -> HashContextP
             return MixedHashProtocol(hash_instance, md5, sha256)
         case HashAlgorithm.MIXED_SHA256_SHA512:
             return MixedHashProtocol(hash_instance, sha256, sha512)
+        case _:
+            raise NotImplementedError
+
+
+def check_valid_hash_for_type(hash_instance: HashAlgorithmInstance, hash: bytes) -> bool:
+    match hash_instance.type:
+        case HashAlgorithm.SHA256:
+            return len(hash) == 32
+        case HashAlgorithm.SHA512:
+            return len(hash) == 64
+        case HashAlgorithm.MIXED_MD5_SHA256:
+            return len(hash) == 48
+        case HashAlgorithm.MIXED_SHA256_SHA512:
+            return len(hash) == 96
         case _:
             raise NotImplementedError
 

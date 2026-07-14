@@ -188,7 +188,7 @@ class GenericEffectfulBackend(EffectfulBackend[HashType, UlidType], AsyncContext
         ):
             yield effectful
 
-    async def prepare_placeholder_for_hash_exn(self, hash: HashType, total_size: int):
+    async def prepare_placeholder_for_hash_exn(self, hash: HashType, placeholder_index: int, total_size: int):
         if not self._params.allowedWrite:
             raise ForbiddenByConfigurationException()
         async with self._acquire_resource_exn(hash, is_write=True):
@@ -254,7 +254,7 @@ class FilerBackend(AsyncContextManagerMixin):
         unexpected = []
         good = {}
         unknown_hash = {}
-        async for resource in list_resources():
+        async for resource in list_resources_reorganize():
             hash = self.parse_hash_from_resource(resource)
             if not hash:
                 unexpected.append(resource)
