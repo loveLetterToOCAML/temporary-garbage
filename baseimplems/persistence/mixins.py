@@ -232,7 +232,7 @@ class ReprMixin(IntrospectionMixin):
                                                                 [k for k in self.relations if k[:2] != '__']
         values = []
         for key in attrs:
-            if key in self.primary_keys:
+            if key in self.primary_keys and state.identity is not None:
                 continue
             if key in state.unloaded:
                 value = '<unloaded>'

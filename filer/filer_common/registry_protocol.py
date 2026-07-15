@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import field, dataclass
-
+from filer.filer_backend.backend_failure import RegistryFailure
 from baseimplems.anyio_utils import NotInAsyncContextManager
 
 from anyio import AsyncContextManagerMixin
-from pydantic import BaseModel
 
-from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
+from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import Protocol, TypeVar, Generic, AsyncIterable, Any
+from dataclasses import dataclass
 from functools import wraps
 
 
@@ -69,28 +68,32 @@ class Listable(Protocol[T, X]):
 # `Any` type in addition for listable, so that specific implementations can increase what can be listed
 class Registry(Listable[MetadataType, HashType | UlidType | MetadataType | Any], Protocol[HashType, UlidType, MetadataType]):
 
-    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
+    async def hash_for_ulid_exn(self, ulid: UlidType) -> HashType | None:
         ...
 
-    async def ulid_for_hash(self, hash: HashType) -> UlidType | None:
+    async def ulid_for_hash_exn(self, hash: HashType) -> UlidType | None:
         ...
 
-    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
+    async def check_hash_and_ulid_exn(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
         ...
 
-    async def size_for_hash(self, hash: HashType) -> int | None:
+    async def size_for_hash_exn(self, hash: HashType) -> int | None:
         ...
 
-    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:  # bool : True is convention for deleted elements
+    async def metadata_for_hash_exn(self, hash: HashType) -> MetadataType | bool | None:  # bool : True is convention for deleted elements
         ...
 
-    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:  # returns the metadata even if object is deleted
+    async def old_metadata_for_hash_exn(self, hash: HashType) -> MetadataType | None:  # returns the metadata even if object is deleted
         ...
 
-    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
+    async def new_item_exn(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         ...
 
-    async def delete_item(self, hash: HashType) -> bool | None:  # responsibility remains to the implementer to handle soft-delete
+    async def delete_item_exn(self, hash: HashType) -> bool | None:  # responsibility remains to the implementer to handle soft-delete
+        """must return: None if hash does not exist, True if successfully deleted, False if soft-deleted"""
+        ...
+
+    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
         ...
 
 
@@ -99,56 +102,62 @@ def guarded(func):
     async def guard(self, *args, **kwargs):
         if not self._async_context_active:
             raise NotInAsyncContextManager(func.__name__, self.__class__.__name__)
-        return await func(self, *args, **kwargs)
+        try:
+            return await func(self, *args, **kwargs)
+        except Exception as exn:
+            return self.exception_to_serialized_failure(exn)
     return guard
 
 class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
 
-    def __init__(self, internal_registry, upper_async_context_manager: _AsyncGeneratorContextManager | None = None):
+    def __init__(self, internal_registry, upper_async_context_manager: AbstractAsyncContextManager | None = None):
         self._internal_registry = internal_registry
         self._async_context_active = False
         self._upper_async_context_manager = upper_async_context_manager
 
     @guarded
-    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
-        return await self._internal_registry.hash_for_ulid(ulid)
+    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None | RegistryFailure:
+        return await self._internal_registry.hash_for_ulid_exn(ulid)
 
     @guarded
-    async def ulid_for_hash(self, hash: HashType) -> UlidType | None:
-        return await self._internal_registry.ulid_for_hash(hash)
+    async def ulid_for_hash(self, hash: HashType) -> UlidType | None | RegistryFailure:
+        return await self._internal_registry.ulid_for_hash_exn(hash)
 
     @guarded
-    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:
-        return await self._internal_registry.check_hash_and_ulid(hash, ulid)
+    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None | RegistryFailure:
+        return await self._internal_registry.check_hash_and_ulid_exn(hash, ulid)
 
     @guarded
-    async def size_for_hash(self, hash: HashType) -> int | None:
-        return await self._internal_registry.size_for_hash(hash)
+    async def size_for_hash(self, hash: HashType) -> int | None | RegistryFailure:
+        return await self._internal_registry.size_for_hash_exn(hash)
 
     @guarded
-    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
-        return await self._internal_registry.metadata_for_hash(hash)
+    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None | RegistryFailure:
+        return await self._internal_registry.metadata_for_hash_exn(hash)
 
     @guarded
-    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
-        return await self._internal_registry.old_metadata_for_hash(hash)
+    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None | RegistryFailure:
+        return await self._internal_registry.old_metadata_for_hash_exn(hash)
 
     @guarded
-    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
-        return await self._internal_registry.new_item(hash, item_metadata, size_of_data)
+    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType | RegistryFailure:
+        return await self._internal_registry.new_item_exn(hash, item_metadata, size_of_data)
 
     @guarded
-    async def delete_item(self, hash: HashType) -> bool | None:
-        return await self._internal_registry.delete_item(hash)
+    async def delete_item(self, hash: HashType) -> bool | None | RegistryFailure:
+        return await self._internal_registry.delete_item_exn(hash)
 
     @guarded
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
-        return await self._internal_registry.list_items(request)
+    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType] | RegistryFailure:
+        return await self._internal_registry.list_items_exn(request)
 
     @guarded
     async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType | Any], request: SimpleListQueryRequest) -> \
-            SimpleListQueryResponse[HashType | UlidType | MetadataType | Any]:
-        return await self._internal_registry.list_items_of_type(item_type, request)
+            SimpleListQueryResponse[HashType | UlidType | MetadataType | Any] | RegistryFailure:
+        return await self._internal_registry.list_items_of_type_exn(item_type, request)
+
+    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
+        return self._internal_registry.exception_to_serialized_failure(exn)
 
     @asynccontextmanager
     async def _enclose_activity_boolean(self):

@@ -105,8 +105,8 @@ class ExceptionType(Enum):
 #   AnySystem::Exception (no generic except very specific cases, base exceptions OK, almost no alias, but AliasedException in selfExecution points to this)
 
 SerExc = Root.register_serialization_child(SerialType.SelfExecution, ExceptionType)
-print(SerExc)
-print(SerExc.path_until())
+#print(SerExc)
+#print(SerExc.path_until())
 
 then = SerExc.register_serialization_child(ExceptionType.RUNTIME_EXCEPTION, SerializableRuntimeException)
 

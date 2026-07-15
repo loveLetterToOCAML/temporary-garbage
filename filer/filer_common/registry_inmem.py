@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType
 from filer.filer_common.registry_protocol import Registry, SimpleListQueryRequest, SimpleListQueryResponse, \
     RegistryInContext
 
@@ -39,76 +40,75 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
         self._ulid_type = ulid_type
         self._metadata_type = metadata_type
         self._keep_deleted_metadata = keep_deleted_metadata
-        self._lock = Lock()
 
-    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
+    async def hash_for_ulid_exn(self, ulid: UlidType) -> HashType | None:
         return self._hashes_for_ulids.get(ulid)
 
-    async def ulid_for_hash(self, hash: HashType) -> UlidType | None:
+    async def ulid_for_hash_exn(self, hash: HashType) -> UlidType | None:
         return self._ulids_for_hashes.get(hash)
 
-    async def check_hash_and_ulid(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
+    async def check_hash_and_ulid_exn(self, hash: HashType, ulid: UlidType) -> bool | None:  # convention: bool is if hash exists
         u = self._ulids_for_hashes.get(hash)
         if u is None:
             return
         return u == ulid
 
-    async def size_for_hash(self, hash: HashType) -> int | None:
+    async def size_for_hash_exn(self, hash: HashType) -> int | None:
         return self._sizes_for_hash.get(hash)
 
-    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
+    async def metadata_for_hash_exn(self, hash: HashType) -> MetadataType | bool | None:
         return hash in self._deleted or self._metadata_for_hashes.get(hash)
 
-    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
+    async def old_metadata_for_hash_exn(self, hash: HashType) -> MetadataType | None:
         return self._metadata_for_hashes.get(hash)
 
-    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
+    async def new_item_exn(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         if hash in self._ulids_for_hashes:
             raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
-        async with self._lock:
-            ulid = self._ulid_type()
-            if ulid in self._hashes_for_ulids:
-                raise Exception(f"Generated ulid {ulid} already in internal state, should not happen")
-            self._hashes_for_ulids[ulid] = hash
-            self._ulids_for_hashes[hash] = ulid
-            self._metadata_for_hashes[hash] = item_metadata
-            self._hashes.append(hash)
-            self._hashes_ok[hash] = True
-            self._sizes_for_hash[hash] = size_of_data
-            if hash in self._deleted:
-                self._deleted = self._deleted.difference({hash})
+
+        ulid = self._ulid_type()
+        if ulid in self._hashes_for_ulids:
+            raise Exception(f"Generated ulid {ulid} already in internal state, should not happen")
+        self._hashes_for_ulids[ulid] = hash
+        self._ulids_for_hashes[hash] = ulid
+        self._metadata_for_hashes[hash] = item_metadata
+        self._hashes.append(hash)
+        self._hashes_ok[hash] = True
+        self._sizes_for_hash[hash] = size_of_data
+        if hash in self._deleted:
+            self._deleted = self._deleted.difference({hash})
         return ulid
 
-    async def delete_item(self, hash: HashType) -> bool | None:
+    async def delete_item_exn(self, hash: HashType) -> bool | None:
         if hash not in self._ulids_for_hashes:
             return None
 
-        async with self._lock:
-            del self._ulids_for_hashes[hash]
-            del self._hashes_ok[hash]
-            if not self._keep_deleted_metadata:
-                del self._metadata_for_hashes[hash]
-                del self._sizes_for_hash[hash]
-            self._deleted.add(hash)
+        del self._ulids_for_hashes[hash]
+        del self._hashes_ok[hash]
+        self._deleted.add(hash)
+        if not self._keep_deleted_metadata:
+            del self._metadata_for_hashes[hash]
+            del self._sizes_for_hash[hash]
+            return True
+        return False
 
     async def resolve_query(self, offset, limit, hash_t, for_h):
         if offset < 0 or limit <= 0 or offset >= len(hash_t):
             raise IndexError(offset)
-        async with self._lock:
-            return SimpleListQueryResponse(
-                items = [for_h[h] if for_h else h for h in hash_t[offset: offset+limit]],
-                total = len(hash_t),
-                hasMore = offset + limit < len(hash_t),
-            )
+        return SimpleListQueryResponse(
+            items = [for_h[h] if for_h else h for h in hash_t[offset: offset+limit]],
+            total = len(hash_t),
+            hasMore = offset + limit < len(hash_t),
+        )
 
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
+    async def list_items_exn(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[MetadataType]:
         if request.sizeInferiorTo is not None or request.sizeSuperiorTo is not None:
             raise NotImplementedError
         if request.includesDeleted:
             return await self.resolve_query(request.offset, request.limit, self._hashes, self._metadata_for_hashes)
         return await self.resolve_query(request.offset, request.limit, self._hashes_ok.keys(), self._metadata_for_hashes)
 
-    async def list_items_of_type(self, item_type: type[HashType | UlidType | MetadataType], request: SimpleListQueryRequest) -> \
+    async def list_items_of_type_exn(self, item_type: type[HashType | UlidType | MetadataType], request: SimpleListQueryRequest) -> \
             SimpleListQueryResponse[HashType | UlidType | MetadataType]:
         if request.includesDeleted:
             hash_source = self._hashes
@@ -126,6 +126,13 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
 
         return await self.resolve_query(request.offset, request.limit, hash_source, data_source)
 
+    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
+        return RegistryFailure(
+            failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
+            humanMessage=f"{exn}",
+            retryable=False,
+            originalException=exn
+        )
 
 class InMemRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType]):
 

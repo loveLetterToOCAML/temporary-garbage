@@ -35,26 +35,33 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
             self._hash_pydantic = None
 
     @with_auto_session
-    async def hash_for_ulid(self, ulid: ULID) -> HashType | None:
+    async def hash_for_ulid_exn(self, ulid: ULID) -> HashType | None:
         result = await self._metadata_type.get_for(ulid=ulid)
         if result:
             return result.hash
 
     @with_auto_session
-    async def ulid_for_hash(self, hash: HashType) -> ULID | None:
+    async def ulid_for_hash_exn(self, hash: HashType) -> ULID | None:
         result = await self._metadata_type.get_for(hash=hash)
         if result:
             return result.ulid
 
     @with_auto_session
-    async def check_hash_and_ulid(self, hash: HashType, ulid: ULID) -> bool | None:
+    async def check_hash_and_ulid_exn(self, hash: HashType, ulid: ULID) -> bool | None:
         result = await self._metadata_type.get_for(hash=hash)
         if not result:
             return None
         return result.ulid == ulid
 
     @with_auto_session
-    async def metadata_for_hash(self, hash: HashType) -> MetadataType | bool | None:
+    async def size_for_hash_exn(self, hash: HashType) -> int | None:
+        result = await self._metadata_type.get_for(hash=hash)
+        if not result:
+            return None
+        return result.size
+
+    @with_auto_session
+    async def metadata_for_hash_exn(self, hash: HashType) -> MetadataType | bool | None:
         result = await self._metadata_type.get_for(hash=hash)
         if not result:
             return
@@ -63,7 +70,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         return await self.old_metadata_for_hash(hash)
 
     @with_auto_session
-    async def old_metadata_for_hash(self, hash: HashType) -> MetadataType | None:
+    async def old_metadata_for_hash_exn(self, hash: HashType) -> MetadataType | None:
         return (await self._internal_metadata_type.execute_query(
             select(self._internal_metadata_type, self._metadata_type) \
                 .options(joinedload(self._metadata_type.metadata_instance)) \
@@ -72,7 +79,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         )).scalar_one()
 
     @with_auto_session_kwargs
-    async def new_item(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0, *, session: AsyncSession) -> ULID:
+    async def new_item_exn(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0, *, session: AsyncSession) -> ULID:
         already_there = await self._metadata_type.get_for(hash=hash)
         if already_there:
             raise Exception(f"Already known {hash} with ulid {already_there.ulid}")
@@ -81,7 +88,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         return new_obj.ulid
 
     @with_auto_session
-    async def delete_item(self, hash: HashType) -> bool | None:
+    async def delete_item_exn(self, hash: HashType) -> bool | None:
         already_there = await self._metadata_type.get_for(hash=hash)
         if not already_there:
             raise Exception(f"Metadata for hash {hash} does not exist, no deletion possible")
@@ -121,7 +128,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         return final
 
     @with_auto_session
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[Any]:  # not able to state the dynamic type self._metadata_type
+    async def list_items_exn(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[Any]:  # not able to state the dynamic type self._metadata_type
         return await self._resolve_query(
             request.offset, request.limit,
             lambda x: self._metadata_pydantic.model_validate(x.metadata_instance),
@@ -130,7 +137,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         )
 
     @with_auto_session
-    async def list_items_of_type(self, item_type: type[HashType | str | MetadataType | Any], request: SimpleListQueryRequest) -> \
+    async def list_items_of_type_exn(self, item_type: type[HashType | str | MetadataType | Any], request: SimpleListQueryRequest) -> \
             SimpleListQueryResponse[HashType | str | MetadataType | Any]:
         includes_mt = False
         if item_type == self._hash_type:

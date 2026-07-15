@@ -1,12 +1,14 @@
 from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholderForUpload, \
     NotExistingContent
 from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance, \
-    check_valid_hash_for_type
+    check_valid_hash_for_type, MixedMd5Sha256
+from filer.filer_backend.effectful_fs import FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
+    FsReadContent, FsDelete, FsList, ExceptionSideEffect
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
 from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
-from filer.filer_backend.effectful_fs import FsSideEffect, FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
-    FsReadContent, FsDelete, FsReadMetadata, FsList, ExceptionSideEffect
 from filer.filer_backend.utils_exn import SerialException
+from policy.log import run_with_log_policy, LogLevel
+from log.logging_context import logger_for
 
 from pydantic import BaseModel
 from anyio import open_file
@@ -15,9 +17,6 @@ from typing import AsyncIterator, Type
 from functools import wraps
 from pathlib import Path
 import os
-
-from log.logging_context import logger_for
-from policy.log import run_with_log_policy, LogLevel
 
 
 def none_if_exception(f):
@@ -32,9 +31,10 @@ def none_if_exception(f):
 
 class FilerBackendFsParameters(BaseModel):
     basePath: Path
-    expectsOnlyRightFormatted: bool = True
+    expectsOnlyRightFormatted: bool = False
     # if allowing any content with expectsOnlyRightFormatted=False, this will lead to renaming of all the files under web-root with the hash of the file content if True
-    allowRenamingOfBadlyFormatted: bool = False
+    allowRenamingOfBadlyFormatted: bool = True
+    defaultHashAlgorithm: HashAlgorithmInstance = MixedMd5Sha256()
 
 
 class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure]):
@@ -62,11 +62,12 @@ class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure
     def _effectful_backend(self) -> EffectfulBackend[Path, BackendFailure]:
         return self._implem
 
+    @staticmethod
+    def static_resource_locator_from_hash(base_path: Path | str, hash: Hashed) -> Path:
+        return Path(base_path) / f"{hash.hashAlgorithm.type.value}-{hash.hash.hex()}"
+
     def resource_locator_from_hash(self, hash: Hashed) -> Path:
-        return Path(
-            self._params.basePath /
-            f"{hash.hashAlgorithm.type.value}-{hash.hash.hex()}"
-        )
+        return self.static_resource_locator_from_hash(self._params.basePath, hash)
 
 
 class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
@@ -136,20 +137,33 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             os.unlink(path)
             self._fs_lgr.info(f"Deleting placeholder resource at {path}", fs_side_effect_for(FsDelete(), path))
 
+    async def _check_and_reformat(self, path: Path):
+        h_instance = hash_protocol_for_type(self._params.defaultHashAlgorithm).fresh_hash_state()
+        async with await anyio.open_file(path, 'rb') as f:
+            chunk = await f.read1(0x1000000)
+            while chunk:
+                h_instance.update(chunk)
+                chunk = await f.read1(0x1000000)
+        new_path = EffectfulFilerFsBackend.static_resource_locator_from_hash(
+            self._params.basePath, h_instance.to_hashed()
+        )
+        os.rename(path, new_path)
+        self._fs_lgr.info(f"Moving resource from {path} to {new_path}", fs_side_effect_for(FsMove(targetPath=new_path), path))
+        return new_path
+
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:
         for entry in os.scandir(self._params.basePath):
             if os.path.isfile(entry.path):
                 path = Path(entry.path)
+                h = EffectfulFilerFsBackend.hash_from_resource_locator(path)
+                if h:
+                    yield path
                 if self._params.expectsOnlyRightFormatted:
-                    h = EffectfulFilerFsBackend.hash_from_resource_locator(path)
-                    if h:
-                        yield path
-                        continue
-                    print("BAD FILE FOUND", path)
-                    if self._params.allowRenamingOfBadlyFormatted:
-                        print("WILL RENAME", path)
                     continue
-                yield path
+                elif self._params.allowRenamingOfBadlyFormatted and (checked_path_or_renamed := await self._check_and_reformat(path)):
+                    yield checked_path_or_renamed
+                elif not self._params.allowRenamingOfBadlyFormatted:
+                    yield path
         self._fs_lgr.info(f"Listed resource at {self._params.basePath}", fs_side_effect_for(FsList(), self._params.basePath))
 
     def _exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
@@ -186,7 +200,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
                     humanMessage='FilerException::EffectfulFilerFsBackend::NotFound',
                     retryable=False
                 )
-        except Exception as exn:
+        except Exception as exn:  # replace exn with potential exception from above
             pass
 
         return BackendFailure(

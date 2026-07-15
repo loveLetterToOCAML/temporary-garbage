@@ -3,6 +3,9 @@ from basetypes.implementation.basetypes_match import DefaultBaseType
 from filer.filer_type_registration import FilerInteractions
 from basetypes.ae_interaction import InteractionType
 
+from pydantic import BaseModel
+
+from typing import TypeVar, Generic
 from enum import Enum
 
 
@@ -14,11 +17,12 @@ class FilerExceptionType(Enum):
     AlreadyUploadingContent = 5
     NotEnoughSpaceRemaining = 6
     OutOfSpaceConstraints = 7
-    AlreadyUploadedChunk = 8
-    BadChunkUploaded = 9
-    PermanentContent = 10
-    BadDeletionKey = 11
-    DeletionKeyRequired = 12
+    OutOfConstraints = 8
+    AlreadyUploadedChunk = 9
+    BadChunkUploaded = 10
+    PermanentContent = 11
+    BadDeletionKey = 12
+    DeletionKeyRequired = 13
 
 
 class PydanticFilerException(PydanticException):
@@ -54,6 +58,43 @@ class NotEnoughSpaceRemaining(PydanticFilerException):
 class OutOfSpaceConstraints(PydanticFilerException):
     requestedSize: int
     maximumSize: int
+
+class FilerConstraintType(Enum):
+    NO_UPLOAD = 1
+    NO_DOWNLOAD = 2
+    NO_DELETION = 3
+
+    MIN_TOTAL_SIZE = 10
+    MAX_TOTAL_SIZE = 11
+    MIN_CHUNK_SIZE = 12
+    MAX_CHUNK_SIZE = 13
+    FIXED_CHUNK_SIZE_EXPECTED = 14
+
+    MAX_ELAPSED_DELAY_FOR_UPLOAD = 20
+    MAX_ELAPSED_DELAY_FOR_NEXT_CHUNK = 21
+    INSUFFICIENT_THROUGHPUT = 22
+
+    TOO_MUCH_PARALLEL_UPLOADS = 30
+    TOO_MUCH_PARALLEL_DOWNLOADS = 31
+
+class PredicateType(Enum):
+    ALWAYS_TRUE = 1
+    ALWAYS_FALSE = 2
+    EQUALS = 3
+    STRICT_INFERIOR = 4
+    INFERIOR = 5
+    STRICT_SUPERIOR = 6
+    SUPERIOR = 7
+
+T = TypeVar('T')
+
+class ExpectedAgainstReality(BaseModel, Generic[T]):
+    ExpectationType: PredicateType
+    referenceValue: T
+
+class OutOfConstraints(PydanticFilerException):
+    failedConstraint: FilerConstraintType
+    details: ExpectedAgainstReality | None = None
 
 class AlreadyUploadedChunk(PydanticFilerException):
     chunkIndex: int

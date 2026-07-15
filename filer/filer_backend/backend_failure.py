@@ -1,10 +1,13 @@
-from filer.base_exceptions import PydanticFilerException
+from typing import Literal
+
 from filer.filer_backend.utils_exn import PydanticException
+from filer.base_exceptions import PydanticFilerException
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from enum import Enum
 
+from filer.filer_type_registration import FilerType
 
 
 # This is already including in the set of Filer exceptions
@@ -28,9 +31,10 @@ class ExternalFailure(PydanticException):
     externalFailureType: ExternalFailureType
 
 
-class BackendFailure(BaseModel):
+class GenericFilerFailure(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
+    executionSystem: FilerType
     failure: ExternalFailure | PydanticFilerException
     humanMessage: str
     retryable: bool = False
@@ -38,3 +42,10 @@ class BackendFailure(BaseModel):
     originalException: Exception | None = Field(
         default=None, exclude=True, repr=False
     )
+
+
+class BackendFailure(GenericFilerFailure):
+    executionSystem: Literal[FilerType.FilerBackend] = FilerType.FilerBackend
+
+class RegistryFailure(GenericFilerFailure):
+    executionSystem: Literal[FilerType.FilerRegistry] = FilerType.FilerRegistry

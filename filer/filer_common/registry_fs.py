@@ -23,7 +23,7 @@ class FsRegistry(Registry[HashType, ULID, MetadataType]):
         self._ulid_type = ulid_type
         self._metadata_type = metadata_type
 
-    async def hash_for_ulid(self, ulid: UlidType) -> HashType | None:
+    async def hash_for_ulid_exn(self, ulid: UlidType) -> HashType | None:
         return self._hashes_for_ulids.get(ulid)
 
     async def ulid_for_hash(self, hash: HashType) -> UlidType | None:

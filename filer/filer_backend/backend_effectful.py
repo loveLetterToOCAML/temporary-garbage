@@ -129,11 +129,6 @@ class GenericBackendParams(BaseModel):
     compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
 
 
-class FsBackendParams(BaseModel):
-    basePath: Path
-    expectsOnlyRightFormatted: bool = True
-    allowRenamingOfBadlyFormatted: bool = True
-    genericParams: GenericBackendParams
 
 
 
@@ -271,7 +266,7 @@ class FilerBackend(AsyncContextManagerMixin):
             case PerHash():
                 return self._bytes_to_hash(intent.intent.hash)
             case _:
-                hash = self._internal_registry.hash_for_ulid(intent.intent.ulid)
+                hash = self._internal_registry.hash_for_ulid_exn(intent.intent.ulid)
                 return self._bytes_to_hash(hash)
 
     async def _process_intent(self, intent: FilerBackendIntent):
@@ -282,7 +277,7 @@ class FilerBackend(AsyncContextManagerMixin):
             case GetContentUlidForHashIntent():
                 return await self._internal_registry.ulid_for_hash(self._bytes_to_hash(intent.hash))
             case GetContentHashForUlidIntent():
-                return await self._internal_registry.hash_for_ulid(intent.ulid)
+                return await self._internal_registry.hash_for_ulid_exn(intent.ulid)
             case CheckContentForHashAndUlidIntent():
                 return await self._internal_registry.check_hash_and_ulid(self._bytes_to_hash(intent.hash), intent.ulid)
             case GetContentIntent():
