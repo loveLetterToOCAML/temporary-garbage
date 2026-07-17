@@ -43,13 +43,6 @@ FilerBackendResult = QueryResult[int, NotExistingContent] | \
                       QueryResult[bool, NotExistingContent | PermanentContent]
 
 
-class StreamConstraints(BaseModel):
-    bootstrapDelaySeconds: float
-    minBytesPerSecond: int
-    maxBytesPerSecond: int
-    backoffDelaySeconds: float
-    toleratedFaults: int
-    resetFaultsDelaySeconds: float
 
 
 class InMemFilerInternalState:
@@ -103,30 +96,6 @@ class BackendType:
     costPerByte: float
     costPerNetworkByte: float
 
-
-# These are params fed to any backend constructor for its own "self-awareness", from an external trusted point of view
-# There is no way whatsoever for a running backend to ensure these parameters are real
-# Also this statement is true from an external point of view: a trust / authority relationship is required
-# Or a "community" peer judgement which can state whether the claimed isolation is right (like an audit team)
-class GenericBackendParams(BaseModel):
-    allowedRead: bool = True
-    allowedWrite: bool = True
-    allowedDeletion: bool = False
-    # in case of no external modification: there is no live check when not in cache, and all data that is in the
-    # repository not matching an expected content hash of ulid is destroyed at the end (if deletion is allowed)
-    allowedExternalModifications: bool = False
-    cacheMetadataAtStartup: bool = True
-    throwIfNotExpected: bool = True
-    throwIfNoFullIntegrity: bool = False
-    onlyCheckIntegrityAtDownloadTime: bool = True
-
-    concurrentParallelWrites: int = 0x40
-    concurrentParallelReads: int = 0x100
-    maximumSizeWrite: int = 0x1000000
-    maximumSizeRead: int = 0x1000000
-
-    compressDataAlgorithm: CompressionAlgorithmInstance | None = None
-    compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
 
 
 

@@ -1,8 +1,7 @@
-from pathlib import Path
-
 from pydantic import BaseModel
 
 from typing import Literal
+from pathlib import Path
 from enum import Enum
 
 

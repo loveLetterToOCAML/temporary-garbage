@@ -1,6 +1,7 @@
 from typing import AsyncIterator
 
 import anyio
+from pydantic import BaseModel
 
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, AlreadyUploadedContent, \
@@ -39,6 +40,17 @@ class GenericBackendParams(BaseModel):
     compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
 
 
+class StreamConstraints(BaseModel):
+    bootstrapDelaySeconds: float
+    minBytesPerSecond: float
+    maxBytesPerSecond: float
+    backoffDelaySeconds: float
+    toleratedFaults: int
+    resetFaultsDelaySeconds: float
+
+
+# TODO: check_final_content_hash_exn
+
 
 class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
@@ -48,10 +60,7 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
         self._current_placeholder_index = 0
 
     async def size_of_content_at_exn(self, locator: Hashed) -> int:
-        sz = self._registry.size_for_hash(locator)
-        if not sz or isinstance(sz, RegistryFailure):  # this does not require refreshing the registry since it would require metadata access
-            return await self._internal.size_of_content_at_exn(locator)
-        return sz
+        return await self._internal.size_of_content_at_exn(locator)
 
     async def prepare_placeholder_at_exn(self, locator: Hashed, placeholder_index: int, total_size: int):
         if not self._params.allowedWrite:
@@ -80,17 +89,6 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
                 AlreadyUploadingContent(
                     hashUploading=locator.hash,
                     placeholderIndex=placeholder_index
-                )
-            )
-
-        md = self._registry.metadata_for_hash(locator)
-        if md and md is not True:  # True is case for soft-deletion, in this case we can upload
-            ulid = self._registry.ulid_for_hash(locator)
-            ulid = None if isinstance(ulid, RegistryFailure) else ulid
-            raise FilerSerialException(
-                AlreadyUploadedContent(
-                    existingUlid=ulid,
-                    hashAttempted=locator.hash
                 )
             )
 
@@ -225,7 +223,6 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
         if increase_reserved_size:  # we wall it after upload_terminate_at, which, if in error, won't cause reserved size increment
             self._current_size += self._expected_total_size_for[placeholder_index]
-            await self._registry.new_item(locator, new_metadata, self._expected_total_size_for[placeholder_index])
 
         # in case upload_terminate_at fails, this cleanup won't be called yet. We may retry upload termination few times
         # then the cleanup task will call _ensure_clean_termination_for_placeholder_called_exactly_once anyway
@@ -254,21 +251,15 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
                 )
             )
 
-        sz = self._registry.size_for_hash(locator)
-        if not sz or isinstance(sz, RegistryFailure):
-            md = self._registry.metadata_for_hash(locator)
-            has_existed = md == True
-            sz = await self._internal.size_for_hash(locator)
-            if isinstance(sz, BackendFailure) or sz is None:
-                raise FilerSerialException(
-                    NotExistingContent(
-                        inputHash=locator.hash,
-                        hasExisted=has_existed
-                    )
+        sz = await self._internal.size_for_hash(locator)
+        if isinstance(sz, BackendFailure) or sz is None:
+            raise FilerSerialException(
+                NotExistingContent(
+                    inputHash=locator.hash,
                 )
-            await self._registry.new_item(locator, new_metadata, sz)
+            )
 
-        return await self._internal.download_chunk_for_hash_exn(locator)
+        return await self._internal.download_chunk_for_hash_exn(locator, offset, size)
 
     async def delete_resource_at_exn(self, locator: Hashed, placeholder_index: int = -1):
         if not self._params.allowedDelete:
@@ -307,7 +298,7 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
             )
         return BackendFailure(
             failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
-            humanMessage='FilerException::EffectfulFilerInMemBackend::InternalError',
+            humanMessage='FilerException::EffectfulConstrainedBackend::InternalError',
             retryable=False,
             originalException=exn
         )
