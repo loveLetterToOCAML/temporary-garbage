@@ -243,7 +243,7 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[Hashed, ContentForHash, Bac
                 hash_type=hash_type
             )
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+    def serialize_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,

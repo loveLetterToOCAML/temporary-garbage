@@ -72,7 +72,7 @@ class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure
 
 class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
-    def __init__(self, params):
+    def __init__(self, params: FilerBackendFsParameters):
         self._current_placeholder_index = 0
         self._params = params
         self._fs_lgr = logger_for(__name__)  # TODO: shouldn't it be resolved during context management entering?
@@ -86,11 +86,6 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             return await f.tell()
 
     async def prepare_placeholder_at_exn(self, locator: Path, placeholder_index: int, total_size: int):
-        # below should be handle by the Safe Backend
-        #if os.path.isfile(locator):
-        #    raise FilerSerialException(
-        #        AlreadyUploadedContent(existingUlid=None, hashAttempted=bytes.fromhex(locator.name))
-        #    )
         placeholder_path = self._placeholder_path_for(locator, placeholder_index)
         if os.path.isfile(placeholder_path):
             raise FilerSerialException(
@@ -148,7 +143,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             self._params.basePath, h_instance.to_hashed()
         )
         os.rename(path, new_path)
-        self._fs_lgr.info(f"Moving resource from {path} to {new_path}", fs_side_effect_for(FsMove(targetPath=new_path), path))
+        self._fs_lgr.info(f"Moving resource from {path} to {new_path}", fs_side_effect_for(FsMove(targetPath=f"{new_path}"), path))
         return new_path
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:
@@ -210,7 +205,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             originalException=exn
         )
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
         processed = self._exception_to_serialized_failure(exn)
         self._fs_lgr.exception(f"Encountered exception {processed}", ExceptionSideEffect(serializedException=processed))
         return processed

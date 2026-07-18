@@ -53,7 +53,9 @@ def current_exception_info() -> ExceptionInfoType:
 
 def exception_info_traceback(exc_info: ExceptionInfoType, limit: int | None = None) -> list[str]:
     lines = _get_stringio_lines(
-        lambda WriteSupport: traceback.print_exception(exc_info[0], exc_info[1], exc_info[2], limit, WriteSupport)
+        lambda WriteSupport: traceback.print_exception(
+            exc_info[0], exc_info[1], exc_info[2], limit, WriteSupport
+        )
     )
     return lines
 

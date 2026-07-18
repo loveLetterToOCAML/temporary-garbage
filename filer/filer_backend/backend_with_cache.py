@@ -65,8 +65,8 @@ class EffectfulFilerWithCacheBackend(EffectfulBackend[HashType, BackendFailure],
     async def delete_item_exn(self, hash: HashType) -> bool | None:
         return await self._registry.delete_item_exn(hash)
 
-    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
-        return self.exception_to_serialized_failure(exn)
+    def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
+        return self.exception_to_registry_failure(exn)
 
 
     async def size_of_content_at_exn(self, locator: HashType) -> int:
@@ -137,8 +137,8 @@ class EffectfulFilerWithCacheBackend(EffectfulBackend[HashType, BackendFailure],
         for hash in self._backend._list_resources_reorganize_exn():
             yield hash
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
-        return self._backend.exception_to_serialized_failure(exn)
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
+        return self._backend.exception_to_registry_failure(exn)
 
 
 if __name__ == '__main__':

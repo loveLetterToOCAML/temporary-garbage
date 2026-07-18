@@ -28,6 +28,18 @@ def check_final_content_hash_exn(expected_hash: Hashed, chunk_gen: Callable[[], 
                 )
             )
 
+async def check_final_content_hash_async_exn(expected_hash: Hashed, chunk_gen: AsyncIterator[bytes]):
+    with expected_hash.compute_new() as h:
+        async for chunk in chunk_gen:
+            h.update(chunk)
+        if not h.is_same(expected_hash.hash):
+            raise FilerSerialException(
+                HashNotMatchingContent(
+                    inputHash=h.digest(),
+                    expectedHash=expected_hash.hash
+                )
+            )
+
 
 class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], EffectfulFilerBackend[Hashed, Hashed, BackendFailure]):
     """
@@ -137,7 +149,7 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
         for hash in self._files_per_hash:
             yield hash
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+    def serialize_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,

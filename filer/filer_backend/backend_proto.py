@@ -3,6 +3,9 @@ from basetypes.implementation.dataformat.hashed import HashContextProtocol
 from typing import Protocol, final, Callable, TypeVar, AsyncIterator
 from functools import wraps
 
+import traceback
+import sys
+
 
 ExternalResourceLocatorType = TypeVar('ExternalResourceLocatorType')
 BackendFailureType = TypeVar('BackendFailureType')
@@ -15,6 +18,7 @@ def encapsulate_exception(exception_converter: Callable[[BackendFailureType], Ex
         try:
             return await f(self, *args, **kwargs)
         except Exception as e:
+            e.__full_stack__ = traceback.extract_stack(sys._getframe(1)) + traceback.extract_tb(e.__traceback__)
             return exception_converter(self, e)
     return encapsulated
 
@@ -54,7 +58,7 @@ class EffectfulBackend(Protocol[ExternalResourceLocatorType, BackendFailureType]
             this also has a reorganizing ability (essentially renaming when allowed) to handle bad resources"""
         ...
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailureType:
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailureType:
         """functions converting non-linear exception to backend failure type and give more of a real API facade (see EffectfulFilerBackend)"""
         ...
 
@@ -116,14 +120,14 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
             return h.is_same()
 
     @final
-    def serialized_exception(self, exn: Exception) -> BackendFailureType:
-        return self._effectful_backend.exception_to_serialized_failure(exn)
+    def exception_to_backend_failure(self, exn: Exception) -> BackendFailureType:
+        return self._effectful_backend.serialize_backend_failure_exception(exn)
 
-    size_for_hash = final(encapsulate_exception(serialized_exception, size_for_hash_exn))
-    prepare_placeholder_for_hash = final(encapsulate_exception(serialized_exception, prepare_placeholder_for_hash_exn))
-    upload_chunk_for_hash = final(encapsulate_exception(serialized_exception, upload_chunk_for_hash_exn))
-    upload_terminate_for_hash = final(encapsulate_exception(serialized_exception, upload_terminate_for_hash_exn))
-    download_chunk_for_hash = final(encapsulate_exception(serialized_exception, download_chunk_for_hash_exn))
-    delete_content = final(encapsulate_exception(serialized_exception, delete_content_exn))
-    check_integrity_for = final(encapsulate_exception(serialized_exception, check_integrity_for_exn))
-    list_resources_reorganize = final(encapsulate_exception(serialized_exception, list_resources_reorganize_exn))
+    size_for_hash = final(encapsulate_exception(exception_to_backend_failure, size_for_hash_exn))
+    prepare_placeholder_for_hash = final(encapsulate_exception(exception_to_backend_failure, prepare_placeholder_for_hash_exn))
+    upload_chunk_for_hash = final(encapsulate_exception(exception_to_backend_failure, upload_chunk_for_hash_exn))
+    upload_terminate_for_hash = final(encapsulate_exception(exception_to_backend_failure, upload_terminate_for_hash_exn))
+    download_chunk_for_hash = final(encapsulate_exception(exception_to_backend_failure, download_chunk_for_hash_exn))
+    delete_content = final(encapsulate_exception(exception_to_backend_failure, delete_content_exn))
+    check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
+    list_resources_reorganize = final(encapsulate_exception(exception_to_backend_failure, list_resources_reorganize_exn))

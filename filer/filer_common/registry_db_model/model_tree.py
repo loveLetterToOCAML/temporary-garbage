@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from baseimplems.persistence.model_utils.high_order_sqlalchemy_registry import register_sqlalchemy_type, \
     default_sqlalchemy_classname_keying
-from baseimplems.persistence.sqlalchemy_database import with_auto_session_kwargs, with_auto_session, \
-    with_current_session_kwargs
 from baseimplems.persistence.model_utils.model_utils_common import TWithID, WithUniqueName, WithID
 from baseimplems.persistence.mixins import BaseMixins, commit_and_rollback_if_exception
+from baseimplems.persistence.sqlalchemy_database import with_current_session_kwargs
 from baseimplems.persistence.model_utils.model_utils_time import CreatedModifiedAt
 from baseimplems.anyio_utils import NotInAsyncContextManager
 

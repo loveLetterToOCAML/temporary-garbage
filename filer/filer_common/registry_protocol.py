@@ -93,7 +93,7 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType | Any],
         """must return: None if hash does not exist, True if successfully deleted, False if soft-deleted"""
         ...
 
-    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
+    def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
         ...
 
 
@@ -105,12 +105,14 @@ def guarded(func):
         try:
             return await func(self, *args, **kwargs)
         except Exception as exn:
-            return self.exception_to_serialized_failure(exn)
+            return self.exception_to_registry_failure(exn)
     return guard
 
 class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
 
-    def __init__(self, internal_registry, upper_async_context_manager: AbstractAsyncContextManager | None = None):
+    def __init__(self, internal_registry: Registry[HashType, UlidType, MetadataType] | None,
+                 upper_async_context_manager: AbstractAsyncContextManager | None = None):
+        # convention: if internal_registry is None, it will be created when entering the context manager
         self._internal_registry = internal_registry
         self._async_context_active = False
         self._upper_async_context_manager = upper_async_context_manager
@@ -156,8 +158,8 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
             SimpleListQueryResponse[HashType | UlidType | MetadataType | Any] | RegistryFailure:
         return await self._internal_registry.list_items_of_type_exn(item_type, request)
 
-    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
-        return self._internal_registry.exception_to_serialized_failure(exn)
+    def exception_to_registry_failure(self, exn: Exception) -> RegistryFailure:
+        return self._internal_registry.serialize_registry_failure_exception(exn)
 
     @asynccontextmanager
     async def _enclose_activity_boolean(self):
@@ -171,9 +173,11 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
     async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
         if self._upper_async_context_manager:
             async with (
-                self._upper_async_context_manager(),
+                self._upper_async_context_manager() as _internal_obj,
                 self._enclose_activity_boolean() as r
             ):
+                if _internal_obj and not self._internal_registry:  # little hack to allow for dynamic sub-object creation
+                    self._internal_registry = _internal_obj
                 yield r
             return
 

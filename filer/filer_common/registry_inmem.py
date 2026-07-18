@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType
 from filer.filer_common.registry_protocol import Registry, SimpleListQueryRequest, SimpleListQueryResponse, \
     RegistryInContext
+from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType
+from filer.filer_backend.utils_proto import ReprEnforced
 
 from sortedcontainers import SortedDict
 from pydantic import BaseModel
-from anyio import Lock
 
 from typing import TypeVar
 
 
-HashType = TypeVar('HashType')
-UlidType = TypeVar('UlidType')
+HashType = TypeVar('HashType', bound=ReprEnforced)
+UlidType = TypeVar('UlidType', bound=ReprEnforced)
 MetadataType = TypeVar('MetadataType', bound=BaseModel)
 
 
@@ -25,17 +25,19 @@ MetadataType = TypeVar('MetadataType', bound=BaseModel)
 class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
 
     def __init__(self, initial_metadata: dict[HashType, MetadataType] | None = None, initial_ulids: dict[HashType, UlidType] | None = None, *,
-                 hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType], keep_deleted_metadata: bool = False):
+                 hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType],
+                 keep_deleted_metadata: bool = False, initial_deleted: list | None = None, initial_sizes: dict[HashType, int] | None = None):
         self._metadata_for_hashes = initial_metadata or {}
-        self._ulids_for_hashes = {h: ulid for h, ulid in (initial_ulids or {}).items() if h in initial_metadata}
-        self._ulids_for_hashes = {h: UlidType() for h in self._metadata_for_hashes if h not in self._ulids_for_hashes}
-        self._hashes_for_ulids = {u: h for h, u in self._metadata_for_hashes.items()}
+        ulids_for_hashes = {h: ulid for h, ulid in (initial_ulids or {}).items() if h in initial_metadata}
+        self._ulids_for_hashes = {h: UlidType() if h not in ulids_for_hashes else ulids_for_hashes[h] for h in self._metadata_for_hashes}
+        self._hashes_for_ulids = {u: h for h, u in self._ulids_for_hashes.items()}
         if len(self._hashes_for_ulids) != len(self._ulids_for_hashes):
             raise Exception(f"Ulids and hashes should be unique {len(self._hashes_for_ulids)} {len(self._ulids_for_hashes)}")
         self._hashes = list(self._metadata_for_hashes.keys())
-        self._hashes_ok = SortedDict()
-        self._sizes_for_hash = {}
-        self._deleted = set()
+        self._hashes_ok = SortedDict({h: True for h in self._hashes})
+        self._deleted = initial_deleted and set(initial_deleted) or set()
+        sizes_for_hash = {h: sz for h, sz in (initial_sizes or {}).items() if h in initial_metadata}
+        self._sizes_for_hash = {h: -1 if h not in sizes_for_hash else sizes_for_hash[h] for h in self._metadata_for_hashes}
         self._hash_type = hash_type
         self._ulid_type = ulid_type
         self._metadata_type = metadata_type
@@ -126,13 +128,22 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
 
         return await self.resolve_query(request.offset, request.limit, hash_source, data_source)
 
-    def exception_to_serialized_failure(self, exn: Exception) -> RegistryFailure:
+    def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
         return RegistryFailure(
             failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
             humanMessage=f"{exn}",
             retryable=False,
             originalException=exn
         )
+
+    def dump_state(self):
+        return {
+            'metadata': {h.hex() if isinstance(h, bytes) else f"{h}": md.model_dump() for h, md in self._metadata_for_hashes.items()},
+            'ulid': {k.hex() if isinstance(k, bytes) else f"{k}": str(v) for k, v in self._ulids_for_hashes.items()},
+            'deleted': [k.hex() if isinstance(k, bytes) else f"{k}" for k in self._deleted],
+            'sizes': {k.hex() if isinstance(k, bytes) else f"{k}": v for k, v in self._sizes_for_hash.items()}
+        }
+
 
 class InMemRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType]):
 

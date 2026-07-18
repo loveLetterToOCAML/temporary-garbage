@@ -1,8 +1,10 @@
+from random import randint
 from typing import AsyncIterator
 
-import anyio
 from pydantic import BaseModel
 
+from baseimplems.datastreams.stream_event import StreamEvent, base_event_from
+from baseimplems.date_utils import utc_now
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, AlreadyUploadedContent, \
     OutOfSpaceConstraints, FilerConstraintType, OutOfConstraints, AlreadyUploadingContent, \
@@ -11,6 +13,16 @@ from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure
 from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn
 from filer.filer_backend.interval_union import IntervalUnion
 from filer.filer_backend.utils_exn import SerialException
+
+
+
+class EffectParams(BaseModel):
+    concurrentParallelWrites: int = 0x40
+    concurrentParallelReads: int = 0x100
+    maximumContentSize: int = 0x400000000  # 16 Gb max
+    minimumContentSize: int = 0x40         # content less than 0x40 should not be uploaded in filer
+    maximumSizeWrite: int = 0x1000000
+    maximumSizeRead: int = 0x1000000
 
 
 # These are params fed to any backend constructor for its own "self-awareness", from an external trusted point of view
@@ -29,24 +41,12 @@ class GenericBackendParams(BaseModel):
     throwIfNoFullIntegrity: bool = False
     onlyCheckIntegrityAtDownloadTime: bool = True
 
-    concurrentParallelWrites: int = 0x40
-    concurrentParallelReads: int = 0x100
-    maximumContentSize: int = 0x400000000  # 16 Gb max
-    minimumContentSize: int = 0x40         # content less than 0x40 should not be uploaded in filer
-    maximumSizeWrite: int = 0x1000000
-    maximumSizeRead: int = 0x1000000
+    effectParams: EffectParams = EffectParams()
 
     compressDataAlgorithm: CompressionAlgorithmInstance | None = None
     compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
 
 
-class StreamConstraints(BaseModel):
-    bootstrapDelaySeconds: float
-    minBytesPerSecond: float
-    maxBytesPerSecond: float
-    backoffDelaySeconds: float
-    toleratedFaults: int
-    resetFaultsDelaySeconds: float
 
 
 # TODO: check_final_content_hash_exn
@@ -103,32 +103,45 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
         result = await self._internal.prepare_placeholder_at(locator, self._current_placeholder_index)
         if isinstance(result, RegistryFailure):
             raise result.originalException
-        self._current_placeholder_index += 1
-        self._current_size_max += total_size
-        self._current_task_group.start_soon(self._start_upload_monitoring, locator, total_size)
+        self._current_task_group.start_soon(self._safe_upload_monitoring, locator, total_size)
 
-    async def _start_upload_monitoring(self, locator: Hashed, total_size: int):
-        it = self._upload_queue.__aiter__()
-        while True:
-            with anyio.move_on_after(0.05) as scope:
-                try:
-                    raw = await it.__anext__()
-                except StopAsyncIteration:
-                    break
+    async def _safe_upload_monitoring(self, locator: Hashed, total_size: int):
+        async with self._lock:
+            placeholder_index = self._current_placeholder_index
+            self._current_placeholder_index += 1
+            self._current_size_max += total_size
 
-            if scope.cancelled_caught:
-                print("waiting")
+        result = None
+        try:
+            result = await self._start_upload_monitoring(locator, placeholder_index)
+        finally:
+            async with self._lock:
+                if result:
+                    self._current_size += total_size
+                self._current_size_max -= total_size
 
-    def _process_end_of_upload(self, receive_end_of_upload_stream):
-        async with receive_end_of_upload_stream:
-            async for obj in receive_end_of_upload_stream:
-                match obj:
-                    case UploadSuccess():
-                        pass
-                    case UploadFailure():
-                        pass
-                    case _:
-                        pass
+    async def _start_upload_monitoring(self, locator: Hashed, placeholder_index: int):
+        async with (
+            StreamWithConstraints(self._upload_stream_constraints) as \
+                (remote_send_stream, remote_send_constraint_intent, remote_receive_constraint_info),
+                remote_send_stream,
+                remote_send_constraint_intent,
+                remote_receive_constraint_info
+        ):
+            self._base_stream_event[(locator, placeholder_index)] = StreamEvent(
+                name='constrainedDownload',
+                index=placeholder_index,
+                randomId=randint(0, 0xffffffff),
+                **base_event_from(utc_now())
+            )
+            self._upload_stream[(locator, placeholder_index)] = remote_send_stream
+            self._constraint_intents_for[(locator, placeholder_index)] = remote_send_constraint_intent
+
+            # this can act as the main loop, while the stream is not closed it means upload continues
+            async for last_constraint in remote_receive_constraint_info:
+                # we only need the last constraint to be up to date
+                self._last_constraint_for[(locator, placeholder_index)] = last_constraint
+
 
     async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
         if not self._params.allowedWrite:
@@ -289,7 +302,7 @@ class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
         for hash in self._internal._list_resources_reorganize_exn():
             yield hash
 
-    def exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,

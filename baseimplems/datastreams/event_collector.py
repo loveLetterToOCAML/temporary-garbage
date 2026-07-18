@@ -11,7 +11,7 @@ from baseimplems.date_utils import utc_now
 from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream, get_cancelled_exc_class
 import anyio
 
-from contextlib import asynccontextmanager, _AsyncGeneratorContextManager
+from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import Type, Callable, Awaitable
 from typing_extensions import AsyncIterator
 from contextvars import ContextVar

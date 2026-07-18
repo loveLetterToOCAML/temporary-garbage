@@ -6,7 +6,8 @@ from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy, w
     with_auto_session_kwargs
 from baseimplems.persistence.model_utils.model_utils_common import TWithID, TWithBytesHash, TWithStringHash, WithID
 from baseimplems.persistence.mixins import RepositoryMixin, commit_and_rollback_if_exception, BaseMixins
-from filer.filer_common.registry_db.model import RegistryMetadataTable_for
+from filer.filer_common.registry_db_model.model import RegistryMetadataTable_for
+from filer.filer_backend.backend_failure import RegistryFailure
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
@@ -161,6 +162,9 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
             includes_deleted=request.includesDeleted, includes_metadata=includes_mt
         )
 
+    def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
+        raise exn
+
 
 class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType]):
 
@@ -199,6 +203,7 @@ if __name__ == '__main__':
         ):
             print(await mock.new_item(b'x', M(a=123), size_of_data=150))
             print(await mock.new_item(b'y', M(a=999), size_of_data=10))
+            print(await mock.new_item(b'y', M(a=8), size_of_data=100))
             print(await mock.list_items(SimpleListQueryRequest(limit=1)))
             print(await mock.list_items(SimpleListQueryRequest(limit=1, sizeInferiorTo=0x200)))
             print(await mock.list_items(SimpleListQueryRequest(limit=1, sizeInferiorTo=100)))

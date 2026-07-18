@@ -1,7 +1,7 @@
 from basetypes.implementation.exceptions.common_exceptions import ExpectedTypeException, HumanReadableException
 from utils.custom_context_var import ContextVarWrapper
 
-from contextlib import _AsyncGeneratorContextManager, _GeneratorContextManager
+from contextlib import AbstractAsyncContextManager, _GeneratorContextManager
 from typing import Type, Any, Callable, Iterable
 from typing_extensions import AsyncIterable
 from contextvars import ContextVar
@@ -23,7 +23,7 @@ class AsyncContextManagerDependencyNotEntered(Exception):
 _reset_wrapping_context_managers = ContextVarWrapper('reset_wrapping_context_managers', default={})
 _reset_wrapping_context_managers_sync = ContextVarWrapper('reset_wrapping_context_managers_sync', default={})
 
-def register_manager_on_context_update(ctxt: ContextVar | ContextVarWrapper, ctxt_manager: _AsyncGeneratorContextManager):
+def register_manager_on_context_update(ctxt: ContextVar | ContextVarWrapper, ctxt_manager: AbstractAsyncContextManager):
     _reset_wrapping_context_managers.setdefault(ctxt, []).append(ctxt_manager)
 
 def register_manager_on_context_update_sync(ctxt: ContextVar, sync_ctxt_manager: _GeneratorContextManager):
@@ -74,7 +74,7 @@ def bind_dynamic(context_var: ContextVar | ContextVarWrapper, **kwargs):
 def run_within(ModelType: Type | Callable, ctxt: ContextVar | ContextVarWrapper,
                default_bind_static_arguments: dict[str, Any] = None,
                default_bind_callable_arguments: dict[str, Callable] = None,
-               upper_context_dependency: _AsyncGeneratorContextManager[dict[str, Any]] | None = None,
+               upper_context_dependency: AbstractAsyncContextManager[dict[str, Any]] | None = None,
                with_static_bound_arguments: bool = True,
                with_dynamic_bound_arguments: bool = True,
                reenter_context: bool = False):
