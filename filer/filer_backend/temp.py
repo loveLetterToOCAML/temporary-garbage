@@ -1,7 +1,7 @@
 from filer.base_types import GetContentSizeIntent, GetContentUlidForHashIntent, GetContentHashForUlidIntent, \
     CheckContentForHashAndUlidIntent, GetContentIntent, UploadContentIntent, DeleteContentIntent, UploadChunkIntent, UploadProgressIntent
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailureType, ExternalFailure
-from filer.filer_backend.backend_proto import EffectfulBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend
 
 FilerBackendIntent = GetContentSizeIntent | GetContentUlidForHashIntent | GetContentHashForUlidIntent | CheckContentForHashAndUlidIntent | \
     GetContentIntent | UploadContentIntent | DeleteContentIntent

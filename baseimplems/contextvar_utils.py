@@ -3,7 +3,6 @@ from typing import TypeVar
 
 from typing_extensions import Generic
 
-from baseimplems.anyio_utils import NotInAsyncContextManager, AsyncContextManagerDependencyNotEntered
 
 T = TypeVar('T')
 
@@ -46,6 +45,7 @@ class ContextVarWrapper(Generic[T]):
         try:
             resolved = self._ctxt_var.get()
         except LookupError:
+            from baseimplems.anyio_utils import AsyncContextManagerDependencyNotEntered
             raise AsyncContextManagerDependencyNotEntered(self._ctxt_var, self._run_within_proposal or self._ctxt_var.name, item)
         return getattr(resolved, item)
 

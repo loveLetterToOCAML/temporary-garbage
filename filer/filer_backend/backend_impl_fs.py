@@ -5,7 +5,7 @@ from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, Ha
 from filer.filer_backend.effectful_fs import FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
     FsReadContent, FsDelete, FsList, ExceptionSideEffect
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
-from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.utils_exn import SerialException
 from policy.log import run_with_log_policy, LogLevel
 from log.logging_context import logger_for
@@ -89,7 +89,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
         placeholder_path = self._placeholder_path_for(locator, placeholder_index)
         if os.path.isfile(placeholder_path):
             raise FilerSerialException(
-                AlreadyUploadingContent(hashUploading=bytes.fromhex(locator.split(os.path.sep)[-1]))  # arf
+                AlreadyUploadingContent(hashUploading=bytes.fromhex(locator.name))
             )
         async with await anyio.open_file(placeholder_path, "wb") as f:
             self._fs_lgr.info(f"Placeholder creation {placeholder_path} and reservation of {total_size} bytes",

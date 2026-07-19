@@ -28,6 +28,9 @@ class FilerExceptionType(Enum):
 class PydanticFilerException(PydanticException):
     pass
 
+class MultiplePydanticFilerException(PydanticFilerException):
+    exceptions: list[PydanticFilerException]
+
 class WithInputUlidAndHash(PydanticFilerException):
     inputUlid: DefaultBaseType.ULID | None = None
     inputHash: bytes | None = None

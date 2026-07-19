@@ -1,7 +1,7 @@
 from basetypes.implementation.exceptions.common_exceptions import ExpectedTypeException, HumanReadableException
-from utils.custom_context_var import ContextVarWrapper
+from baseimplems.contextvar_utils import ContextVarWrapper
 
-from contextlib import AbstractAsyncContextManager, _GeneratorContextManager
+from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Type, Any, Callable, Iterable
 from typing_extensions import AsyncIterable
 from contextvars import ContextVar
@@ -26,7 +26,7 @@ _reset_wrapping_context_managers_sync = ContextVarWrapper('reset_wrapping_contex
 def register_manager_on_context_update(ctxt: ContextVar | ContextVarWrapper, ctxt_manager: AbstractAsyncContextManager):
     _reset_wrapping_context_managers.setdefault(ctxt, []).append(ctxt_manager)
 
-def register_manager_on_context_update_sync(ctxt: ContextVar, sync_ctxt_manager: _GeneratorContextManager):
+def register_manager_on_context_update_sync(ctxt: ContextVar, sync_ctxt_manager: AbstractContextManager):
     _reset_wrapping_context_managers_sync.setdefault(ctxt, []).append(sync_ctxt_manager)
 
 

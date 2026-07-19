@@ -5,7 +5,7 @@ from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure,
 from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance
 from baseimplems.persistence.model_utils.model_utils_common import WithBytesHashPrimaryKey, WithID
 from baseimplems.persistence.mixins import BaseMixins, commit_and_rollback_if_exception
-from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn
 from filer.filer_backend.interval_union import IntervalUnion
 from filer.filer_backend.utils_exn import SerialException

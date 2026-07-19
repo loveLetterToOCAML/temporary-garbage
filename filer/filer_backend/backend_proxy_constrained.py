@@ -1,19 +1,19 @@
-from random import randint
-from typing import AsyncIterator
+from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, FilerConstraintType, OutOfConstraints, \
+    AlreadyUploadingContent, NotExistingPlaceholderForUpload, NotExistingContent
+from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
+from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn, FilerBackendInMemParameters
+from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
+from baseimplems.datastreams.stream_event import StreamEvent, base_event_from
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
+from basetypes.implementation.dataformat.hashed import Hashed
+from filer.filer_backend.interval_union import IntervalUnion
+from filer.filer_backend.utils_exn import SerialException
+from baseimplems.date_utils import utc_now
 
 from pydantic import BaseModel
 
-from baseimplems.datastreams.stream_event import StreamEvent, base_event_from
-from baseimplems.date_utils import utc_now
-from basetypes.implementation.dataformat.hashed import Hashed
-from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, AlreadyUploadedContent, \
-    OutOfSpaceConstraints, FilerConstraintType, OutOfConstraints, AlreadyUploadingContent, \
-    NotExistingPlaceholderForUpload, NotExistingContent
-from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
-from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn
-from filer.filer_backend.interval_union import IntervalUnion
-from filer.filer_backend.utils_exn import SerialException
-
+from typing import AsyncIterator
+from random import randint
 
 
 class EffectParams(BaseModel):
@@ -29,30 +29,36 @@ class EffectParams(BaseModel):
 # There is no way whatsoever for a running backend to ensure these parameters are real
 # Also this statement is true from an external point of view: a trust / authority relationship is required
 # Or a "community" peer judgement which can state whether the claimed isolation is right (like an audit team)
-class GenericBackendParams(BaseModel):
+class GenericBackendParameters(BaseModel):
     allowedRead: bool = True
     allowedWrite: bool = True
     allowedDeletion: bool = False
-    # in case of no external modification: there is no live check when not in cache, and all data that is in the
-    # repository not matching an expected content hash of ulid is destroyed at the end (if deletion is allowed)
-    allowedExternalModifications: bool = False
-    cacheMetadataAtStartup: bool = True
-    throwIfNotExpected: bool = True
-    throwIfNoFullIntegrity: bool = False
-    onlyCheckIntegrityAtDownloadTime: bool = True
 
+
+class FilerBackendSqlAlchemyParameters(BaseModel):
+    pass
+
+KnownBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | FilerBackendSqlAlchemyParameters
+
+class ConstrainedBackendParameters(BaseModel):
+    globalParameters: GenericBackendParameters = GenericBackendParameters()
+    backendParameters: KnownBackendParameters
     effectParams: EffectParams = EffectParams()
 
     compressDataAlgorithm: CompressionAlgorithmInstance | None = None
     compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
 
 
-
-
 # TODO: check_final_content_hash_exn
 
+"""
+EffectfulConstrainedBackend is the most complete piece of policies applied at generic backend level
 
-class EffectfulContrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
+Its role is both to ensure strict stream constraints are respected, as well as hashes are matching uploaded content
+It also has the role of checking if compression would be useful and apply it
+"""
+
+class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
     def __init__(self, params):
         self._params = params

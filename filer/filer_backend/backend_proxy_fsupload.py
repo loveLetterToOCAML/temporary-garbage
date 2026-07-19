@@ -1,6 +1,6 @@
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFilerFsBackend
 from filer.filer_backend.backend_impl_inmem import check_final_content_hash_async_exn
-from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.backend_failure import BackendFailure
 from basetypes.implementation.dataformat.hashed import Hashed
 

@@ -136,63 +136,6 @@ class AsyncTimeController(AsyncContextManagerMixin):
             yield send_orders
 
 
-class GenericEffectfulBackend(EffectfulBackend[HashType, UlidType], AsyncContextManagerMixin):
-
-    def __init__(self, params: GenericBackendParams, internal_ez_thing):
-        self._params = params
-        self._write_limiter = anyio.CapacityLimiter(params.concurrentParallelWrites)
-        self._read_limiter = anyio.CapacityLimiter(params.concurrentParallelReads)
-
-    @asynccontextmanager
-    def _acquire_resource_exn(self, hash: HashType, is_write: bool = True):
-        external_resource_location = self._internal_thing.locator_for_hash_exn(hash)
-        async with (
-            self._write_limiter if is_write else self._read_limiter,
-            self._internal_thing.acquire(external_resource_location, is_write=is_write) as effectful
-        ):
-            yield effectful
-
-    async def prepare_placeholder_for_hash_exn(self, hash: HashType, placeholder_index: int, total_size: int):
-        if not self._params.allowedWrite:
-            raise ForbiddenByConfigurationException()
-        async with self._acquire_resource_exn(hash, is_write=True):
-            await effectful.upload_chunk_exn(offset, data)
-
-    async def upload_chunk_for_hash_exn(self, hash: HashType, offset: int, data: bytes):
-        if not self._params.allowedWrite:
-            raise ForbiddenByConfigurationException()
-        async with self._acquire_resource_exn(hash, is_write=True):
-            await effectful.upload_chunk_exn(offset, data)
-
-    async def download_chunk_for_hash_exn(self, hash: HashType, offset: int, size: int) -> bytes:
-        if not self._params.allowedRead:
-            raise ForbiddenByConfigurationException()
-        async with self._acquire_resource_exn(hash, is_write=False):
-            return await effectful.download_chunk_exn(offset, size)
-
-    @asynccontextmanager
-    async def __asynccontextmanager__(self):
-        self.startup_metadata_report = IntegrityReport[HashType, UlidType]()
-        if self._params.cacheMetadataAtStartup:
-            self.startup_metadata_report = self.ensure_integrity(delete_bad=self._params.allowedDeletion)
-
-        if self._params.throwIfNotExpected and self.startup_metadata_report.unexpectedItems:
-            raise UnexpectedItems(self.startup_metadata_report.unexpectedItems)
-
-        if self._params.throwIfNoFullIntegrity and self.startup_metadata_report.contentNotMatchingHashes:
-            raise ContentNotMatchingHashes(self.startup_metadata_report.contentNotMatchingHashes)
-
-        try:
-            yield self.startup_metadata_report
-        finally:
-            if not self._params.allowedExternalModifications and self._params.allowedDeletion:  # this case redo a full integrity check
-                final_report = self.ensure_integrity(delete_bad=self._params.allowedDeletion)
-                for fname in final_report.unexpectedItems:
-                    self.delete_content(hash)
-                for hash in final_report.contentNotMatchingHashes:
-                    self.delete_content(hash)
-
-
 
 class EasyProtocol(Protocol[LocatorType]):
 

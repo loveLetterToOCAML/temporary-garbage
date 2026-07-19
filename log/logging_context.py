@@ -1,7 +1,7 @@
 from baseimplems.anyio_utils import register_manager_on_context_update_sync
 from policy.log import LogPolicy, PythonLoggingApi, current_log_policy
 from log.logging_wrapping_logger import PythonLoggingWrappingLogger
-from utils.custom_context_var import ContextVarWrapper
+from baseimplems.contextvar_utils import ContextVarWrapper
 from context.init import InitContextVarException
 from log.logger_api import LoggerApi
 

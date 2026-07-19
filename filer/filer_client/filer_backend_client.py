@@ -29,8 +29,8 @@ class FilerBackendClientConfig(BaseModel):
     concurrentParallelWrites: int = 0x40
     concurrentParallelReads: int = 0x100
 
-    compressDataAlgorithm: CompressionAlgorithmInstance | None = None
-    compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
+    compressDataAlgorithm: CompressionAlgorithmInstance | None = None  # None means data won't be stored compressed anyway
+    compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will upload compressed
 
     retryPolicy: None
 

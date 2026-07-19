@@ -1,7 +1,7 @@
 from filer.base_exceptions import NotExistingContent, NotEnoughSpaceRemaining, FilerSerialException, \
     AlreadyUploadingContent, NotExistingPlaceholderForUpload, AlreadyUploadedContent, HashNotMatchingContent
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailureType, ExternalFailure
-from filer.filer_backend.backend_proto import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.interval_union_bytes import BytesIntervalUnion
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.filer_backend.utils_exn import SerialException
@@ -85,14 +85,6 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
                     remainingSize=self._params.allowedMemory - self._current_size_max
                 )
             )
-        # below should be handle by the Safe Backend
-        #if locator in self._files_per_hash:
-        #    raise FilerSerialException(
-        #        AlreadyUploadedContent(
-        #            existingUlid=None,
-        #            hashAttempted=locator.hash
-        #        )
-        #    )
         if placeholder_index in self._temporaryfiles_per_placeholder_index:  # should never happen in theory due to auto increment
             raise FilerSerialException(
                 AlreadyUploadingContent(

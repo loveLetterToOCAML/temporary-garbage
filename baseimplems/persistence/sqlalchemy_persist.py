@@ -1,4 +1,4 @@
-from utils.custom_context_var import ContextVarWrapper
+from baseimplems.contextvar_utils import ContextVarWrapper
 from baseimplems.anyio_utils import run_within
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
