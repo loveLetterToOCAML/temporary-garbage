@@ -1,6 +1,6 @@
 from basetypes.implementation.dataformat.hashed import HashContextProtocol
 
-from typing import Protocol, final, Callable, TypeVar, AsyncIterator
+from typing import Protocol, final, Callable, TypeVar, AsyncIterator, Self
 from functools import wraps
 
 import traceback
@@ -12,7 +12,7 @@ BackendFailureType = TypeVar('BackendFailureType')
 HashType = TypeVar('HashType', bound=HashContextProtocol)  # just for the compute_new context manager
 
 
-def encapsulate_exception(exception_converter: Callable[[BackendFailureType], Exception], f):
+def encapsulate_exception(exception_converter: Callable[[Self, Exception], BackendFailureType], f):
     @wraps(f)
     async def encapsulated(self, *args, **kwargs):
         try:
@@ -131,3 +131,22 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
     delete_content = final(encapsulate_exception(exception_to_backend_failure, delete_content_exn))
     check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
     list_resources_reorganize = final(encapsulate_exception(exception_to_backend_failure, list_resources_reorganize_exn))
+
+
+class EffectfulFilerBackendDefault(EffectfulBackend[ExternalResourceLocatorType, BackendFailureType],
+                                   EffectfulFilerBackend[ExternalResourceLocatorType, ExternalResourceLocatorType, BackendFailureType]):
+    """This provides default implementation in case we only want natural EffectfulFilerBackend extension of a FilerBackend
+        and don't need any conversion function to convert a hash into locator and conversely"""
+
+    @property
+    @final
+    def _effectful_backend(self) -> EffectfulBackend[ExternalResourceLocatorType, BackendFailureType]:
+        return self
+
+    @final
+    def hash_from_resource_locator(self, locator: ExternalResourceLocatorType) -> ExternalResourceLocatorType | None:
+        return locator
+
+    @final
+    def resource_locator_from_hash(self, hash: ExternalResourceLocatorType) -> ExternalResourceLocatorType:
+        return hash

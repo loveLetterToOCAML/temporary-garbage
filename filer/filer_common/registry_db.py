@@ -9,16 +9,27 @@ from baseimplems.persistence.mixins import RepositoryMixin, commit_and_rollback_
 from filer.filer_common.registry_db_model.model import RegistryMetadataTable_for
 from filer.filer_backend.backend_failure import RegistryFailure
 
+from sqlalchemy.orm import Mapped, joinedload, mapped_column
+from sqlalchemy import Integer, select, func, DateTime
 from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from contextlib import asynccontextmanager
 from typing import TypeVar, Type, Any
+from datetime import datetime
 from types import NoneType
 
 
 HashType = TypeVar('HashType')
 MetadataType = TypeVar('MetadataType', bound=RepositoryMixin)
+
+
+class SimpleRegistryMetadataSqlalchemy(WithID, *BaseMixins):
+    __tablename__ = 'SimpleRegistryMetadata'
+
+    date_begin_upload: Mapped[datetime] = mapped_column(DateTime)
+    date_end_upload: Mapped[datetime] = mapped_column(DateTime)
+    number_of_accesses: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
@@ -185,9 +196,7 @@ class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType])
 
 if __name__ == '__main__':
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
-    from sqlalchemy.testing.schema import mapped_column
-    from sqlalchemy.orm import Mapped, joinedload
-    from sqlalchemy import Integer, select, func
+
     import anyio
 
 

@@ -1,7 +1,7 @@
 from filer.base_exceptions import NotExistingContent, NotEnoughSpaceRemaining, FilerSerialException, \
     AlreadyUploadingContent, NotExistingPlaceholderForUpload, AlreadyUploadedContent, HashNotMatchingContent
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailureType, ExternalFailure
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend, EffectfulFilerBackendDefault
 from filer.filer_backend.interval_union_bytes import BytesIntervalUnion
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.filer_backend.utils_exn import SerialException
@@ -41,7 +41,7 @@ async def check_final_content_hash_async_exn(expected_hash: Hashed, chunk_gen: A
             )
 
 
-class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], EffectfulFilerBackend[Hashed, Hashed, BackendFailure]):
+class EffectfulFilerInMemBackend(EffectfulFilerBackendDefault[Hashed, BackendFailure]):
     """
     Simple in mem filer backend with two constraints: not too much fragmentation during upload (maxIntervalParts)
     and maximum allowed memory to store file content (allowedMemory)
@@ -53,17 +53,6 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
         self._current_size_max = 0
         self._files_per_hash: dict[Hashed, bytes] = {}
         self._temporaryfiles_per_placeholder_index: dict[int, BytesIntervalUnion] = {}
-
-    @property
-    def _effectful_backend(self) -> EffectfulBackend[Hashed, BackendFailure]:
-        return self
-
-    def hash_from_resource_locator(self, locator: Hashed) -> Hashed | None:
-        return locator
-
-    def resource_locator_from_hash(self, hash: Hashed) -> Hashed:
-        return hash
-
 
     def _check_existing_content_exn(self, locator: Hashed):
         if locator not in self._files_per_hash:
@@ -141,7 +130,7 @@ class EffectfulFilerInMemBackend(EffectfulBackend[Hashed, BackendFailure], Effec
         for hash in self._files_per_hash:
             yield hash
 
-    def serialize_failure_exception(self, exn: Exception) -> BackendFailure:
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,

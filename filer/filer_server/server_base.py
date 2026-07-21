@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend, EffectfulFilerBackendDefault
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
+from filer.filer_common.registry_factory import FilerRegistryFor
 from filer.filter_registry.registry import FilerRegistryParameters
 from filer.filer_server.server_chain import HashableWithBytesRepr
 from filer.filer_backend.backend_effectful import IntegrityReport
@@ -49,21 +50,9 @@ The EffectfulFilerServerExternal will implement more complex metadata storage as
 external users when performing actions
 """
 class EffectfulFilerServer(
-    EffectfulBackend[HashType, BackendFailure | RegistryFailure],
-    EffectfulFilerBackend[HashType, HashType, BackendFailure | RegistryFailure],
+    EffectfulFilerBackendDefault[HashType, BackendFailure | RegistryFailure],
     AsyncContextManagerMixin
 ):
-    @property
-    def _effectful_backend(self) -> EffectfulBackend[HashType, BackendFailure | RegistryFailure]:
-        return self
-
-    def hash_from_resource_locator(self, locator: HashType) -> HashType | None:
-        return locator
-
-    def resource_locator_from_hash(self, hash: HashType) -> HashType:
-        return hash
-
-
     def __init__(self, server_params: FilerServerParameters):
         self._global_params = server_params
         self._init_parameters = self._global_params.initParameters

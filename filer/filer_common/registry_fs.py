@@ -4,7 +4,7 @@ from baseimplems.persistence.sqlalchemy_persist import attempt_unlink, wait_for_
 from filer.filer_common.registry_protocol import RegistryInContext
 from filer.filer_common.registry_inmem import InMemRegistry
 
-from anyio import AsyncContextManagerMixin, Lock, NamedTemporaryFile, open_file, create_task_group, Event, CancelScope
+from anyio import AsyncContextManagerMixin, Lock, NamedTemporaryFile, open_file, create_task_group, Event, CancelScope, sleep
 from pydantic import BaseModel
 
 from typing import TypeVar, Literal, AsyncIterator
@@ -63,7 +63,7 @@ class FsRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType], A
         with CancelScope() as self._autosave_loop:
             self._cancel_loop_ready.set()
             while True:
-                await anyio.sleep(delay)
+                await sleep(delay)
                 await self.save_to()
 
     @asynccontextmanager

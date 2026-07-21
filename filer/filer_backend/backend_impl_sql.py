@@ -243,7 +243,7 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[Hashed, ContentForHash, Bac
                 hash_type=hash_type
             )
 
-    def serialize_failure_exception(self, exn: Exception) -> BackendFailure:
+    def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,
@@ -268,8 +268,8 @@ class EffectfulFilerSqlBackend(EffectfulFilerBackend[Hashed, ContentForHash, Bac
 
 
 if __name__ == '__main__':
-    from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
+    from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type
     from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy
 
     import anyio

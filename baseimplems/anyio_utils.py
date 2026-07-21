@@ -140,7 +140,7 @@ def run_within(ModelType: Type | Callable, ctxt: ContextVar | ContextVarWrapper,
 def run_within_sync(ModelType: Type, ctxt: ContextVar | ContextVarWrapper,
                     default_bind_static_arguments: dict[str, Any] = None,
                     default_bind_callable_arguments: dict[str, Callable] = None,
-                    upper_context_dependency: _GeneratorContextManager[dict[str, Any]] | None = None,
+                    upper_context_dependency: AbstractContextManager[dict[str, Any]] | None = None,
                     with_static_bound_arguments: bool = True,
                     with_dynamic_bound_arguments: bool = True):
 

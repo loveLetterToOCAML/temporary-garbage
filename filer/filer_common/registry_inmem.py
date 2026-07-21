@@ -95,7 +95,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
         return False
 
     async def resolve_query(self, offset, limit, hash_t, for_h):
-        if offset < 0 or limit <= 0 or offset >= len(hash_t):
+        if offset < 0 or limit <= 0 or offset > len(hash_t):
             raise IndexError(offset)
         return SimpleListQueryResponse(
             items = [for_h[h] if for_h else h for h in hash_t[offset: offset+limit]],

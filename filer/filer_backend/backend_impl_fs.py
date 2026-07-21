@@ -91,7 +91,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             raise FilerSerialException(
                 AlreadyUploadingContent(hashUploading=bytes.fromhex(locator.name))
             )
-        async with await anyio.open_file(placeholder_path, "wb") as f:
+        async with await open_file(placeholder_path, "wb") as f:
             self._fs_lgr.info(f"Placeholder creation {placeholder_path} and reservation of {total_size} bytes",
                               fs_side_effect_for(FsCreateReserve(reservedBytes=total_size), placeholder_path))
             await f.truncate(total_size)
@@ -99,7 +99,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
     async def upload_chunk_at_exn(self, locator: Path, placeholder_index: int, offset: int, data: bytes) -> int:
         path = self._placeholder_path_for(locator, placeholder_index)
         async with (
-            await anyio.open_file(path, "r+b") as f
+            await open_file(path, "r+b") as f
         ):
             await f.seek(offset)
             await f.write(data)
@@ -115,7 +115,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
     async def download_chunk_from_exn(self, locator: Path, offset: int, size: int) -> bytes:
         async with (
-            await anyio.open_file(locator, "rb") as f
+            await open_file(locator, "rb") as f
         ):
             await f.seek(offset)
             result = await f.read(size)
@@ -134,7 +134,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
     async def _check_and_reformat(self, path: Path):
         h_instance = hash_protocol_for_type(self._params.defaultHashAlgorithm).fresh_hash_state()
-        async with await anyio.open_file(path, 'rb') as f:
+        async with await open_file(path, 'rb') as f:
             chunk = await f.read1(0x1000000)
             while chunk:
                 h_instance.update(chunk)
@@ -216,6 +216,7 @@ if __name__ == '__main__':
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
 
     import anyio
+
 
     data = b'x' * 0x1000
     chosenHashAlg = MixedMd5Sha256()
