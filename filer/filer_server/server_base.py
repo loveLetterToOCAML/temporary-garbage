@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend, EffectfulFilerBackendDefault
+from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
-from filer.filer_common.registry_factory import FilerRegistryFor
-from filer.filter_registry.registry import FilerRegistryParameters
 from filer.filer_server.server_chain import HashableWithBytesRepr
 from filer.filer_backend.backend_effectful import IntegrityReport
+from filer.filer_backend.backend_factory import FilerBackendFor
+from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
 from basetypes.implementation.dataformat.hashed import Hashed
 
 from anyio import AsyncContextManagerMixin
@@ -37,7 +37,7 @@ class FilerServerParameters(BaseModel):
     globalParameters: GenericBackendParameters  # filer server is still a backend, and can be configured to restrict what can be done on it independently of linked backends
     initParameters: FilerServerInitParameters | None  # if none, one can consider the backend is not persistent and no metadata import is performed
     backendParameters: ConstrainedBackendParameters
-    registryParameters: FilerRegistryParameters
+    registryParameters: KnownFilerRegistryParameters
 
 """
 EffectfulFilerServer = base component that ensures coherence between a fast-access registry and a backend

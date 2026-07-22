@@ -1,5 +1,6 @@
 from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, FilerConstraintType, OutOfConstraints, \
     AlreadyUploadingContent, NotExistingPlaceholderForUpload, NotExistingContent
+from filer.filer_backend.backend_factory import KnownFilerBackendParameters
 from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
 from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn, FilerBackendInMemParameters
 from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
@@ -35,18 +36,13 @@ class GenericBackendParameters(BaseModel):
     allowedDeletion: bool = False
 
 
-class FilerBackendSqlAlchemyParameters(BaseModel):
-    pass
-
-KnownBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | FilerBackendSqlAlchemyParameters
-
 class ConstrainedBackendParameters(BaseModel):
     globalParameters: GenericBackendParameters = GenericBackendParameters()
-    backendParameters: KnownBackendParameters
+    backendParameters: KnownFilerBackendParameters
     effectParams: EffectParams = EffectParams()
 
     compressDataAlgorithm: CompressionAlgorithmInstance | None = None
-    compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size, will store compressed
+    compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size (& compressDataAlgorithm is true), will store compressed
 
 
 # TODO: check_final_content_hash_exn

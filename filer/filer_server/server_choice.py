@@ -1,4 +1,8 @@
+from pydantic import BaseModel
 
+
+class FilerServerMultipleParameters(BaseModel):
+    pass
 
 class EffectfulFilerServerMultibackend():
 
@@ -6,4 +10,4 @@ class EffectfulFilerServerMultibackend():
         pass
 
 
-current_backends = ContextVarWrapper[list[EffectfulBackend[HashType, BackendFailure]]]('current_backends')
+#current_backends = ContextVarWrapper[list[EffectfulBackend[HashType, BackendFailure]]]('current_backends')

@@ -38,6 +38,14 @@ run_with_persistent_mock_db_engine = run_within(
     }
 )
 
+run_with_default_sqlite_engine = run_within(
+    create_async_engine,
+    sqlalchemy_db_engine,
+    default_bind_callable_arguments={
+        'url': lambda: f"sqlite+aiosqlite:///{sqlalchemy_sqlite_db_path.get()}"
+    }
+)
+
 
 async def attempt_unlink(fname, max_time: float = 3, sleep_time: float = 0.5):
     start = time.time()
@@ -66,7 +74,6 @@ async def enclose_within_temporary_file_interactive_mock():
             await wait_for_input_with_timeout(f"Will exit the named scope for {f.name} in {timeout} seconds (or input enter to exit)", timeout)
     finally:
         await attempt_unlink(f.name)
-
 
 
 run_with_temporarily_persistent_mock_db_engine = run_within(

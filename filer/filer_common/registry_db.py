@@ -194,8 +194,29 @@ class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType])
             yield
 
 
+class SQLiteDatabaseRegistryCreateDbContext(RegistryInContext[HashType, ULID, MetadataType]):
+
+    def __init__(self, db_path: str, *, metadata_type: TWithID, hash_type: TWithStringHash | TWithBytesHash | Type | None = None,
+                 delete_metadata_info_on_delete: bool = False):
+        reg = DatabaseRegistry[HashType, MetadataType](
+            metadata_type=metadata_type, hash_type=hash_type, delete_metadata_info_on_delete=delete_metadata_info_on_delete
+        )
+        self._db_path = db_path
+        super().__init__(reg, self._ensure_current_db)
+
+    @asynccontextmanager
+    async def _ensure_current_db(self):
+        async with (
+            run_within_sqlite_db_path(self._db_path),
+            run_with_default_sqlite_engine(),
+            run_within_sqlalchemy() as _,
+        ):
+            yield
+
+
 if __name__ == '__main__':
-    from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
+    from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine, \
+    run_within_sqlite_db_path, run_with_default_sqlite_engine
 
     import anyio
 

@@ -13,11 +13,14 @@ class InMemRegistryConfig(BaseModel):
 class DbRegistryInContextConfig(BaseModel):
     pass
 
+class DbRegistryWithSqlitePathConfig(BaseModel):
+    dbFilename: str
+
 class RemoteRegistryInContext(BaseModel):
     pass
 
 
-RegistryParameters = FsRegistryConfig | InMemRegistryConfig | DbRegistryInContextConfig | RemoteRegistryInContext
+KnownFilerRegistryParameters = FsRegistryConfig | InMemRegistryConfig | DbRegistryInContextConfig | DbRegistryWithSqlitePathConfig | RemoteRegistryInContext
 
 
 class UlidWrapper(ULID):
@@ -35,7 +38,7 @@ class SimpleRegistryMetadataPydantic(BaseModel):
     numberOfAccesses: int = 0
 
 
-def FilerRegistryFor(registry_params: RegistryParameters):
+def FilerRegistryFor(registry_params: KnownFilerRegistryParameters):
     match registry_params:
         case FsRegistryConfig():
             return FsRegistryInContext[bytes, UlidWrapper, SimpleRegistryMetadataPydantic](
@@ -48,6 +51,13 @@ def FilerRegistryFor(registry_params: RegistryParameters):
             # don't import sqlalchemy dependency if not required / not installed
             from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, DatabaseRegistryInContext
             return DatabaseRegistryInContext[bytes, SimpleRegistryMetadataSqlalchemy](
+                hash_type=bytes,
+                metadata_type=SimpleRegistryMetadataSqlalchemy
+            )
+        case DbRegistryWithSqlitePathConfig():
+            from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, SQLiteDatabaseRegistryCreateDbContext
+            return SQLiteDatabaseRegistryCreateDbContext[bytes, SimpleRegistryMetadataSqlalchemy](
+                DbRegistryWithSqlitePathConfig.dbFilename,
                 hash_type=bytes,
                 metadata_type=SimpleRegistryMetadataSqlalchemy
             )
@@ -64,7 +74,7 @@ def FilerRegistryFor(registry_params: RegistryParameters):
 
 if __name__ == '__main__':
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
-    from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy
+    from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, SQLiteDatabaseRegistryCreateDbContext
     from filer.filer_common.registry_protocol import SimpleListQueryRequest
     from baseimplems.date_utils import utc_now
 

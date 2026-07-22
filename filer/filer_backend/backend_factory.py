@@ -13,10 +13,10 @@ class RemoteBackendInContextParameters(BaseModel):
     pass
 
 
-BackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | RemoteBackendInContextParameters
+KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | RemoteBackendInContextParameters
 
 
-def FilerBackendFor(backend_params: BackendParameters):
+def FilerBackendFor(backend_params: KnownFilerBackendParameters):
     match backend_params:
         case FilerBackendInMemParameters():
             return EffectfulFilerInMemBackend(backend_params)
