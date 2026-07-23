@@ -1,4 +1,4 @@
-from filer.filer_common.registry_fs import FsRegistryConfig, FsRegistryInContext
+from filer.filer_common.registry_fs import FsRegistryParameters, FsRegistryInContext
 from filer.filer_common.registry_inmem import InMemRegistryInContext
 
 from pydantic import BaseModel
@@ -7,20 +7,20 @@ from ulid import ULID
 from datetime import datetime, timedelta
 
 
-class InMemRegistryConfig(BaseModel):
+class InMemRegistryParameters(BaseModel):
     pass
 
-class DbRegistryInContextConfig(BaseModel):
+class DbRegistryInContextParameters(BaseModel):
     pass
 
-class DbRegistryWithSqlitePathConfig(BaseModel):
+class DbRegistryWithSqlitePathParameters(BaseModel):
     dbFilename: str
 
 class RemoteRegistryInContext(BaseModel):
     pass
 
 
-KnownFilerRegistryParameters = FsRegistryConfig | InMemRegistryConfig | DbRegistryInContextConfig | DbRegistryWithSqlitePathConfig | RemoteRegistryInContext
+KnownFilerRegistryParameters = FsRegistryParameters | InMemRegistryParameters | DbRegistryInContextParameters | DbRegistryWithSqlitePathParameters | RemoteRegistryInContext
 
 
 class UlidWrapper(ULID):
@@ -40,28 +40,28 @@ class SimpleRegistryMetadataPydantic(BaseModel):
 
 def FilerRegistryFor(registry_params: KnownFilerRegistryParameters):
     match registry_params:
-        case FsRegistryConfig():
+        case FsRegistryParameters():
             return FsRegistryInContext[bytes, UlidWrapper, SimpleRegistryMetadataPydantic](
                 params=registry_params,
                 hash_type=bytes,
                 ulid_type=UlidWrapper,
                 metadata_type=SimpleRegistryMetadataPydantic
             )
-        case DbRegistryInContextConfig():
+        case DbRegistryInContextParameters():
             # don't import sqlalchemy dependency if not required / not installed
             from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, DatabaseRegistryInContext
             return DatabaseRegistryInContext[bytes, SimpleRegistryMetadataSqlalchemy](
                 hash_type=bytes,
                 metadata_type=SimpleRegistryMetadataSqlalchemy
             )
-        case DbRegistryWithSqlitePathConfig():
+        case DbRegistryWithSqlitePathParameters():
             from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, SQLiteDatabaseRegistryCreateDbContext
             return SQLiteDatabaseRegistryCreateDbContext[bytes, SimpleRegistryMetadataSqlalchemy](
-                DbRegistryWithSqlitePathConfig.dbFilename,
+                DbRegistryWithSqlitePathParameters.dbFilename,
                 hash_type=bytes,
                 metadata_type=SimpleRegistryMetadataSqlalchemy
             )
-        case InMemRegistryConfig():
+        case InMemRegistryParameters():
             return InMemRegistryInContext[bytes, UlidWrapper, SimpleRegistryMetadataPydantic](
                 hash_type=bytes,
                 ulid_type=UlidWrapper,
@@ -80,9 +80,9 @@ if __name__ == '__main__':
 
     import anyio
 
-    f1 = FilerRegistryFor(FsRegistryConfig(mock=True))
-    f2 = FilerRegistryFor(DbRegistryInContextConfig())
-    f3 = FilerRegistryFor(InMemRegistryConfig())
+    f1 = FilerRegistryFor(FsRegistryParameters(mock=True))
+    f2 = FilerRegistryFor(DbRegistryInContextParameters())
+    f3 = FilerRegistryFor(InMemRegistryParameters())
 
     async def main():
         async with f1:

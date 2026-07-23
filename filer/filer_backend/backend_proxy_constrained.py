@@ -2,11 +2,11 @@ from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining,
     AlreadyUploadingContent, NotExistingPlaceholderForUpload, NotExistingContent
 from filer.filer_backend.backend_factory import KnownFilerBackendParameters
 from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
-from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn, FilerBackendInMemParameters
+from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn
 from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
 from baseimplems.datastreams.stream_event import StreamEvent, base_event_from
-from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
 from basetypes.implementation.dataformat.hashed import Hashed
+from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.interval_union import IntervalUnion
 from filer.filer_backend.utils_exn import SerialException
 from baseimplems.date_utils import utc_now

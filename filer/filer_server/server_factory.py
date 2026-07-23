@@ -1,3 +1,8 @@
+from contextlib import asynccontextmanager
+
+from filer.filer_server.common_servers import default_in_memory_filer_server_parameters, \
+    default_fs_filer_server_parameters, default_sql_filer_server_parameters, \
+    sql_filer_server_with_fs_registry_parameters
 from filer.filer_server.server_choice import FilerServerMultipleParameters, EffectfulFilerServerMultibackend
 from filer.filer_server.server_chain import FilerServerChainParameters, EffectfulFilerServerChain
 from filer.filer_server.server_base import FilerServerParameters, EffectfulFilerServer
@@ -24,6 +29,14 @@ def FilerServerFor(server_params: KnownServerParameters):
             raise NotImplementedError
 
 
+@asynccontextmanager
+async def in_memory_filer_server():
+    server = EffectfulFilerServer(default_in_memory_filer_server_parameters())
+    async with server as integrity_report:
+        yield server
+
+
+
 if __name__ == '__main__':
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
@@ -41,12 +54,18 @@ if __name__ == '__main__':
             run_with_temporarily_persistent_mock_db_engine(echo=False),
             run_within_sqlalchemy() as _,
         ):
-            f1 = FilerServerFor(FilerServerParameters())
-            f2 = FilerServerFor(FilerServerChainParameters(basePath=main_dir))
-            f3 = FilerServerFor(DbBackendInContextParameters())
+            f1 = FilerServerFor(sql_filer_server_with_fs_registry_parameters())
+            fscp = FilerServerChainParameters(
+                fasterServerParameters=default_fs_filer_server_parameters(),
+                slowerServerParameters=default_sql_filer_server_parameters()
+            )
+            fscp2 = FilerServerChainParameters(
+                fasterServerParameters=default_in_memory_filer_server_parameters(),
+                slowerServerParameters=fscp
+            )
+            f2 = FilerServerFor(fscp2)
 
             print(await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000))
             print(await f2.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'b'), 0, 10001))
-            print(await f3.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'c'), 0, 10002))
 
     anyio.run(main)

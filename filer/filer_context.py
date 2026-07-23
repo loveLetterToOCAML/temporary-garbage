@@ -1,20 +1,19 @@
-from typing import Literal
-
-from baseimplems.anyio_utils import run_within
 from baseimplems.contextvar_utils import ContextVarPropertyWrapper
+from baseimplems.anyio_utils import run_within
 from context.init import current_fs_base
-
-from contextlib import asynccontextmanager
-from contextvars import ContextVar
 
 from pydantic import BaseModel
 
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from typing import Literal
 import os
 
 
 default_filer_registry_name = 'registry-{type}.yaml'
 default_filer_registry_name_with_id = 'registry-{type}-{id}.yaml'
 default_filer_sql_registry_name_with_id = 'registry-{type}-{id}.sql'
+default_filer_backend_name = 'backend-{name}'
 default_filer_dirname = 'filer'
 
 
@@ -52,6 +51,9 @@ def file_registry_path_for(filer_type: Literal['inmem'] | Literal['fs'] | Litera
 
 def sqlite_registry_path_for(filer_type: Literal['inmem'] | Literal['fs'] | Literal['sql'], registry_index: str | int):
     return os.path.join(current_filer_fs_base.get(), default_filer_sql_registry_name_with_id.format(type=filer_type, id=registry_index))
+
+def file_backend_basepath_for(backend_name: str | int):
+    return os.path.join(current_filer_fs_base.get(), default_filer_backend_name.format(name=backend_name))
 
 
 if __name__ == '__main__':

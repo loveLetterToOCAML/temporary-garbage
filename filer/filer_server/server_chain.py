@@ -5,6 +5,7 @@ from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent, 
 from filer.filer_server.server_base import FilerServerParameters, BackendFailureType
 from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.backend_failure import BackendFailure
+from filer.filer_server.server_factory import FilerServerFor
 
 from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
@@ -188,3 +189,7 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
             self._faster
         ):
             yield self
+
+
+if __name__ == '__main__':
+    pass

@@ -20,7 +20,7 @@ UlidType = TypeVar('UlidType')
 MetadataType = TypeVar('MetadataType', bound=BaseModel)
 
 
-class FsRegistryConfig(BaseModel):
+class FsRegistryParameters(BaseModel):
     filename: Path | str | None = None
     extension: Literal['YAML'] | Literal['JSON'] = 'YAML'
     allowRegistryRewriteIfBadFormat: bool = False
@@ -31,7 +31,7 @@ class FsRegistryConfig(BaseModel):
 
 class FsRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType], AsyncContextManagerMixin):
 
-    def __init__(self, params: FsRegistryConfig, *, hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType]):
+    def __init__(self, params: FsRegistryParameters, *, hash_type: type[HashType], ulid_type: type[UlidType], metadata_type: type[MetadataType]):
         self._params = params
         self._hash_type = hash_type
         self._ulid_type = ulid_type
@@ -162,7 +162,7 @@ if __name__ == '__main__':
 
     async def test():
         async with NamedTemporaryFile(mode="w+", suffix='.yml', delete_on_close=False) as f:
-            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryConfig(mock=True), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as mock:
+            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryParameters(mock=True), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as mock:
                 print(await mock.new_item(b'x', M(a=123), 186))
                 print(await mock.new_item(b'y', M(b='metadata'), 80870))
                 print(await mock.new_item(b'z', M(b='metadataz'), 1337))
@@ -176,13 +176,13 @@ if __name__ == '__main__':
 
                 await mock.save_to(f.name)
 
-            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryConfig(filename=f.name), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as second_one:
+            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryParameters(filename=f.name), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as second_one:
                 print(await second_one.list_items_of_type(bytes, SimpleListQueryRequest()))
                 print(await second_one.list_items_of_type(UlidWrapper, SimpleListQueryRequest()))
                 print(await second_one.new_item(b'w', M(b='metadataz')))
                 print(await second_one.list_items_of_type(UlidWrapper, SimpleListQueryRequest()))
 
-            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryConfig(filename=f.name), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as second_one:
+            async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryParameters(filename=f.name), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as second_one:
                 print(await second_one.list_items_of_type(bytes, SimpleListQueryRequest()))
                 print(await second_one.list_items_of_type(UlidWrapper, SimpleListQueryRequest()))
                 print(await second_one.new_item(b'u', M(b='metadataz')))
