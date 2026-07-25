@@ -6,7 +6,7 @@ from baseimplems.anyio_utils import NotInAsyncContextManager
 from anyio import AsyncContextManagerMixin
 
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
-from typing import Protocol, TypeVar, Generic, AsyncIterable, Any
+from typing import Protocol, TypeVar, Generic, AsyncIterator, Any
 from dataclasses import dataclass
 from functools import wraps
 
@@ -170,7 +170,7 @@ class RegistryInContext(Registry[HashType, UlidType, MetadataType], AsyncContext
             self._async_context_active = False
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self) -> AsyncIterable[RegistryInContext]:
+    async def __asynccontextmanager__(self) -> AsyncIterator[RegistryInContext]:
         if self._upper_async_context_manager:
             async with (
                 self._upper_async_context_manager() as _internal_obj,

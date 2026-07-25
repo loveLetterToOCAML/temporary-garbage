@@ -7,7 +7,7 @@ from baseimplems.contextvar_utils import ContextVarWrapper
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from anyio import AsyncContextManagerMixin, Event, Lock
 
-from collections.abc import AsyncIterator
+from typing import ParamSpec, TypeVar, Callable, Concatenate, Any, Awaitable, AsyncIterator
 from contextlib import asynccontextmanager
 from functools import wraps
 
@@ -89,21 +89,24 @@ current_sqlalchemy_session = ContextVarWrapper[AsyncSession]('sqlalchemy_session
 run_within_session = run_within(AsyncSession, current_sqlalchemy_session)
 
 
-def with_auto_session(f):
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def with_auto_session(f: Callable[[Concatenate[Any, P]], Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @wraps(f)
     async def sub(*args, **kwargs):
         async with sqlalchemy_base.session():
             return await f(*args, **kwargs)
     return sub
 
-def with_auto_session_kwargs(f):
+def with_auto_session_kwargs(f: Callable[[Concatenate[Any, P]], Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @wraps(f)
     async def sub(*args, **kwargs):
         async with sqlalchemy_base.session() as session:
             return await f(*args, **kwargs, session=session)
     return sub
 
-def with_auto_session_kwargs_gen(f):
+def with_auto_session_kwargs_gen(f: Callable[[Concatenate[Any, P]], AsyncIterator[R]]) -> Callable[P, AsyncIterator[R]]:
     @wraps(f)
     async def sub(*args, **kwargs):
         async with sqlalchemy_base.session() as session:
@@ -111,7 +114,7 @@ def with_auto_session_kwargs_gen(f):
                 yield data
     return sub
 
-def with_current_session_kwargs(f):
+def with_current_session_kwargs(f: Callable[[Concatenate[Any, P]], Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @wraps(f)
     async def sub(*args, **kwargs):
         return await f(*args, **kwargs, session=current_sqlalchemy_session.get())

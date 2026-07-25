@@ -1,14 +1,17 @@
-import time
-from contextlib import asynccontextmanager
-from typing import AsyncIterable
+from baseimplems.datastreams.stream_event import StreamEvent, event_payload_size, StreamStarting, StreamInProgress, \
+    StreamEnding, base_event_from, StreamEndReason, BytesStreamEvent, TransitStatus
+from baseimplems.datastreams.observers import StatePoller
+from baseimplems.date_utils import utc_now
 
-import anyio
-from anyio import AsyncContextManagerMixin, create_memory_object_stream, create_task_group, move_on_after, CancelScope
-from anyio.streams.memory import MemoryObjectSendStream, MemoryObjectReceiveStream
+from anyio import AsyncContextManagerMixin, create_memory_object_stream, create_task_group, CancelScope, Event
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from pydantic import BaseModel
+import anyio
 
-from baseimplems.datastreams.event_processing import run_with_stats_stream
-from baseimplems.datastreams.stream_event import StreamEvent
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from random import randint
+import time
 
 
 class StreamConstraints(BaseModel):
@@ -16,106 +19,212 @@ class StreamConstraints(BaseModel):
     bootstrapDelaySeconds: float
     minBytesPerSecond: float
     maxBytesPerSecond: float
-    backoffDelaySeconds: float
+    probeDelaySeconds: float    # normal delay between two watch probes
+    backoffDelaySeconds: float  # delay in case of fault
     toleratedFaults: int
-    resetFaultsDelaySeconds: float
+    resetFaultsDelaySeconds: float  # delay before fault counter is reset
 
 
-class ConstraintInformation(BaseModel):
+class StreamInformation(BaseModel):
     remainingDurationSeconds: float
     currentBytesPerSecond: float
     currentFaulted: int
     remainingFaults: int
     delayBeforeFaultResetSeconds: float
+    status: StreamStarting | StreamInProgress | StreamEnding
 
 
-class StreamWithConstraints(AsyncContextManagerMixin):
+current_watchguard_index = ContextVar[int]('current_stream_watchguard_index', default=0)
+
+
+class StreamWatchguard(AsyncContextManagerMixin):
 
     def __init__(self, params: StreamConstraints):
         self._params = params
         self._total_time_max = self._params.bootstrapDelaySeconds + self._params.maximumStreamDurationSeconds
+        idx = current_watchguard_index.get()
+        current_watchguard_index.set(idx + 1)
+        self._stream_identifier = {
+            'name': 'stream-watchguard',
+            'index': idx,
+            'randomId': randint(0, 0xffffffff),
+        }
+        self._watchguard_creation_time = utc_now()
+        self._current_stream_status = StreamStarting(**self._stream_identifier, **base_event_from())
+        self._start_constraint_max = False
+        self._next_delay = 0
+        self._started_at = time.monotonic()
+        self._cur_throughput = 0
+        self._cur_faults = 0
+        self._last_fault = -1
+        self._total_bytes = 0
+        self._bootstrapped = -1
 
-    def _construct_constraint_information(self):
-        remaining = self._total_time_max - (time.monotonic() - self._started_at)
-        remaining = 0 if remaining < 0 else remaining
-        return ConstraintInformation(
-            remainingDurationSeconds=remaining,
-            currentBytesPerSecond=self._cur_throughput,
-            currentFaulted=self._cur_faults,
-            remainingFaults=self._params.toleratedFaults - self._cur_faults,
-            delayBeforeFaultResetSeconds=self._params.resetFaultsDelaySeconds - (time.monotonic() - self._last_fault)
-        )
+    def _update_end_status(self, cancel_scope: CancelScope, end_reason: StreamEndReason, end_reason_str: str):
+        if not self._current_stream_status:  # first one only is to decide which is the real stop reason
+            self._current_stream_status = StreamEnding(
+                **self._stream_identifier, **base_event_from(self._watchguard_creation_time),
+                reason=end_reason, details=end_reason_str
+            )
+        cancel_scope.cancel(end_reason_str)
 
-    async def _update_stream_stats(self, stream_event: StreamEvent, local_send_constraint_info: MemoryObjectSendStream):
-        await local_send_constraint_info.send()
+    def _update_stream_stats(self, stream_event: StreamEvent | None = None):
+        if self._start_constraint_max:
+            elapsed = time.monotonic() - self._bootstrapped
+        else:
+            elapsed = time.monotonic() - self._started_at
+        if stream_event:
+            self._total_bytes += event_payload_size(stream_event)
+        self._cur_throughput = self._total_bytes / elapsed
 
-    async def _process_stream_event_loop(self, cancel_scope: CancelScope, local_receive_stream, local_send_constraint_info: MemoryObjectSendStream):
+    async def _process_stream_event_loop(self, cancel_scope: CancelScope, local_receive_stream: MemoryObjectReceiveStream[StreamEvent]):
         async with (
             local_receive_stream,
         ):
             async for stream_event in local_receive_stream:
-                await self._update_stream_stats(stream_event, local_send_constraint_info)
-            cancel_scope.cancel('remote peer disconnected')
+                self._update_stream_stats(stream_event)
+            self._update_end_status(cancel_scope, StreamEndReason.END_OF_INPUT, 'remote peer disconnected')
 
-    async def _handle_global_timeout(self, cancel_scope: CancelScope, local_send_constraint_info: MemoryObjectSendStream):
-        await anyio.sleep(self._params.bootstrapDelaySeconds + self._params.maximumStreamDurationSeconds)
-        await local_send_constraint_info.send(self._construct_constraint_information())
-        # await remote_send_stream.aclose()
-        # await local_send_constraint_info.aclose()
-        cancel_scope.cancel('global timeout')
-
-    async def _handle_stream_constraints(self, cancel_scope: CancelScope, local_send_constraint_info: MemoryObjectSendStream):
+    async def _handle_stream_constraints(self, cancel_scope: CancelScope):
         await anyio.sleep(self._params.bootstrapDelaySeconds)
+        self._bootstrapped = time.monotonic()
         while True:
+            if self._cur_faults > self._params.toleratedFaults:
+                break
+
             await anyio.sleep(self._next_delay)
+            self._update_stream_stats()
 
-        await local_send_constraint_info.send(self._construct_constraint_information())
-        cancel_scope.cancel('constraints not fulfilled')
+            if not self._start_constraint_max and time.monotonic() - self._started_at < 1.5 * (time.monotonic() - self._bootstrapped):
+                self._start_constraint_max = True
 
-    async def _transfer_constraint_info(self, local_receive_orders: AsyncIterable, local_send_constraint_info: MemoryObjectSendStream):
-        async for _ in local_receive_orders:
-            await local_send_constraint_info.send(self._construct_constraint_information())
+            if self._cur_throughput < self._params.minBytesPerSecond or \
+                    (self._cur_throughput > self._params.maxBytesPerSecond and self._start_constraint_max):
+                self._cur_faults += 1
+                self._last_fault = time.monotonic()
+                self._next_delay = self._params.backoffDelaySeconds
+                continue
+
+            if self._cur_faults > 0 and time.monotonic() - self._last_fault > self._params.resetFaultsDelaySeconds:
+                self._cur_faults = 0
+            self._next_delay = self._params.probeDelaySeconds
+        self._update_end_status(cancel_scope, StreamEndReason.EXCEPTION_DURING_PROCESS, 'constraints not fulfilled')
+
+    async def _handle_global_timeout(self, cancel_scope: CancelScope):
+        await anyio.sleep(self._params.bootstrapDelaySeconds + self._params.maximumStreamDurationSeconds)
+        self._update_end_status(cancel_scope, StreamEndReason.EXCEPTION_DURING_PROCESS, 'stream watchguard global timeout')
+
+    async def _handle_external_end_event(self, cancel_scope: CancelScope, external_stream_end: Event):
+        await external_stream_end.wait()
+        self._update_end_status(cancel_scope, StreamEndReason.EXCEPTION_DURING_PROCESS, 'stream watchguard externally interrupted')
+
+    def current_internal_state(self) -> StreamInformation:
+        remaining = self._total_time_max - (time.monotonic() - self._started_at)
+        remaining = 0 if remaining < 0 else remaining
+        return StreamInformation(
+            remainingDurationSeconds=remaining,
+            currentBytesPerSecond=self._cur_throughput,
+            currentFaulted=self._cur_faults,
+            remainingFaults=self._params.toleratedFaults - self._cur_faults,
+            delayBeforeFaultResetSeconds=(self._params.resetFaultsDelaySeconds - (time.monotonic() - self._last_fault)) if self._cur_faults else -1,
+            status=self._current_stream_status if self._current_stream_status else \
+                StreamInProgress(**self._stream_identifier, **base_event_from(self._watchguard_creation_time))
+        )
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
         remote_send_stream, local_receive_stream = create_memory_object_stream[StreamEvent](max_buffer_size=0x100)
-
-        remote_send_constraint_intent, local_receive_orders = create_memory_object_stream[bool](max_buffer_size=0x10)
-        local_send_constraint_info, remote_receive_constraint_info = create_memory_object_stream[ConstraintInformation](max_buffer_size=0x100)
+        external_stream_poller = StatePoller(self.current_internal_state)
+        external_stream_end = Event()
 
         async with (
-            create_task_group() as tg,
+            external_stream_poller,
             local_receive_stream,
-            local_receive_orders,
-            local_send_constraint_info
+            create_task_group() as tg,
         ):
-            self._next_delay = 0
+            self._current_stream_status = None
             self._started_at = time.monotonic()
-            self._cur_throughput = 0
-            self._cur_faults = 0
-            self._last_fault = -1
             with CancelScope() as cancel_scope:
-                tg.start_soon(self._transfer_constraint_info, local_receive_orders, local_send_constraint_info)
-                tg.start_soon(self._process_stream_event_loop, cancel_scope, local_receive_stream, local_send_constraint_info)
-                tg.start_soon(self._handle_global_timeout, cancel_scope, local_send_constraint_info)
-                tg.start_soon(self._handle_stream_constraints, cancel_scope, local_send_constraint_info)
-                yield remote_send_stream, remote_send_constraint_intent, remote_receive_constraint_info
+                tg.start_soon(self._process_stream_event_loop, cancel_scope, local_receive_stream)
+                tg.start_soon(self._handle_stream_constraints, cancel_scope)
+                tg.start_soon(self._handle_global_timeout, cancel_scope)
+                tg.start_soon(self._handle_external_end_event, cancel_scope, external_stream_end)
+                yield remote_send_stream, external_stream_poller, external_stream_end
+
+            tg.cancel_scope.cancel()  # cancel task group after any condition
+
+
+async def generate_stream_event(plan: dict[float, int], sender: MemoryObjectSendStream[bytes]):
+    stream_identifier = {
+        'name': 'stream-mock',
+        'index': 0,
+        'randomId': randint(0, 0xffffffff),
+        **base_event_from()
+    }
+    cur_offset = 0
+    for time_offset, sz in plan.items():
+        print('[.] sleeping', time_offset - cur_offset, 'sending', sz, 'bytes')
+        await anyio.sleep(time_offset - cur_offset)
+        cur_offset = time_offset
+        await sender.send(BytesStreamEvent(offset=0, size=sz, status=TransitStatus.DONE, **stream_identifier))
 
 
 @asynccontextmanager
-async def default_prepare_event_handlers_context():
-    async with (
-        run_with_stats_stream(),
-    ):
-        yield {'async_handlers': [current_stats_stream.get(), send_to_print_with_threshold.send]}
+async def generate_stream_event_task(plan: dict[float, int], sender: MemoryObjectSendStream[bytes]):
+    async with create_task_group() as tg:
+        tg.start_soon(generate_stream_event, plan, sender)
+        yield tg
 
-stream_event_collector = ContextVar[EventCollector]('stream_events')
-run_with_event_collector = run_within(
-    EventCollector,
-    stream_event_collector,
-    #default_bind_static_arguments = {
-    #    'sync_handlers': [default_test_print_stream_event],
-    #},
-    upper_context_dependency=default_prepare_event_handlers_context
-)
-current_stream_event_stream = ContextVar[StreamEventStream]('current_stream_event_stream')
+
+if __name__ == '__main__':
+
+    async def print_all(prefix, stream_poller):
+        async for value in stream_poller:
+            print(prefix, value)
+            await anyio.sleep(0.5)
+
+    async def main(params, plan: dict[float, int]):
+        guard = StreamWatchguard(params)
+        async with (
+            guard as (remote_send_stream, external_stream_poller, external_stream_end),
+            remote_send_stream,
+            generate_stream_event_task(plan, remote_send_stream),
+        ):
+            await print_all("value while it works", external_stream_poller)
+        print("last value", guard.current_internal_state())
+
+    params1 = StreamConstraints(
+        maximumStreamDurationSeconds=10,
+        bootstrapDelaySeconds=1,
+        minBytesPerSecond=2,
+        maxBytesPerSecond=1000,
+        probeDelaySeconds=0.4,
+        backoffDelaySeconds=1,
+        toleratedFaults=3,
+        resetFaultsDelaySeconds=1
+    )
+
+    plans = []
+    plans.append({})
+    plan = {
+        0.6: 2,
+        1: 2,
+        2: 1,
+        2.3: 1,
+        2.6: 1,
+        3: 1,
+        5: 2,
+        6: 2
+    }
+    plans.append(plan)
+    plan = {
+        1: 0x100,
+        2: 0x100,
+        3: 0x100,
+        4: 0x1000
+    }
+    plans.append(plan)
+    for plan in plans:
+        print("[+] testing new plan", plan)
+        anyio.run(main, params1, plan)
+        print("")

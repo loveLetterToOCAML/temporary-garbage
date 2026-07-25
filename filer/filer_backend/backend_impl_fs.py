@@ -143,7 +143,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             self._params.basePath, h_instance.to_hashed()
         )
         os.rename(path, new_path)
-        self._fs_lgr.info(f"Moving resource from {path} to {new_path}", fs_side_effect_for(FsMove(targetPath=f"{new_path}"), path))
+        self._fs_lgr.warning(f"Moving resource from {path} to {new_path}", fs_side_effect_for(FsMove(targetPath=f"{new_path}"), path))
         return new_path
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:

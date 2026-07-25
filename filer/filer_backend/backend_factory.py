@@ -1,19 +1,13 @@
-from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFilerFsBackend
+from filer.filer_backend.backend_proxy_constrained import ConstrainedBackendParameters, EffectfulConstrainedFilerBackend
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters, EffectfulFilerInMemBackend
+from filer.filer_backend.backend_impl_sql import EffectfulFilerSqlBackend, DbBackendInContextParameters
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFilerFsBackend
 from basetypes.implementation.dataformat.hashed import Hashed, MixedMd5Sha256
-from filer.filer_backend.backend_impl_sql import EffectfulFilerSqlBackend
-
-from pydantic import BaseModel
+from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
 
 
-class DbBackendInContextParameters(BaseModel):
-    pass
-
-class RemoteBackendInContextParameters(BaseModel):
-    pass
-
-
-KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | RemoteBackendInContextParameters
+KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | \
+                              RemoteBackendInContextParameters | ConstrainedBackendParameters
 
 
 def FilerBackendFor(backend_params: KnownFilerBackendParameters):
@@ -24,6 +18,8 @@ def FilerBackendFor(backend_params: KnownFilerBackendParameters):
             return EffectfulFilerFsBackend(backend_params)
         case DbBackendInContextParameters():
             return EffectfulFilerSqlBackend()
+        case ConstrainedBackendParameters():
+            return EffectfulConstrainedFilerBackend(backend_params)
         case _:
             raise NotImplementedError
 

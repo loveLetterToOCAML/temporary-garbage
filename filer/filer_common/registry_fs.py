@@ -23,6 +23,7 @@ MetadataType = TypeVar('MetadataType', bound=BaseModel)
 class FsRegistryParameters(BaseModel):
     filename: Path | str | None = None
     extension: Literal['YAML'] | Literal['JSON'] = 'YAML'
+    allowRegistryFileCreationIfNotExisting: bool = True
     allowRegistryRewriteIfBadFormat: bool = False
     allowSubdirCreation: bool = False
     mock: bool = False
@@ -69,9 +70,13 @@ class FsRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType], A
     @asynccontextmanager
     async def _internal_load_and_save(self, filename) -> AsyncIterator[FsRegistryInContext]:
         self._filename = filename
+        initial_metadata = None
+        initial_ulids = None
+        initial_deleted = None
+        initial_sizes = None
 
         try:
-            base = await self._load()
+            base = await self._load() or {}
             initial_metadata = base.get('metadata', {})
             initial_ulids = base.get('ulid', {})
             initial_deleted = base.get('deleted', [])
@@ -83,13 +88,14 @@ class FsRegistryInContext(RegistryInContext[HashType, UlidType, MetadataType], A
             initial_sizes = {bytes.fromhex(k) if self._hash_type == bytes else self._hash_type(k): v
                              for k, v in initial_sizes.items()}
             initial_deleted = [bytes.fromhex(k) if self._hash_type == bytes else self._hash_type(k) for k in initial_deleted]
+        except FileNotFoundError:
+            if not self._params.allowRegistryFileCreationIfNotExisting:
+                raise Exception(f"Unable to create {self._filename}: not existing and not allowing creation")
+            async with await open_file(self._filename, 'w'):
+                pass
         except Exception as e:
             if not self._params.allowRegistryRewriteIfBadFormat:
                 raise Exception(f"Unable to load content of type {self._params.extension}: {e}")
-            initial_metadata = None
-            initial_ulids = None
-            initial_deleted = None
-            initial_sizes = None
 
         reg = InMemRegistry[HashType, UlidType, MetadataType](
             initial_metadata=initial_metadata,

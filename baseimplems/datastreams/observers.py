@@ -1,63 +1,42 @@
+import contextlib
+from contextlib import AbstractAsyncContextManager
+from typing import Callable, AsyncIterator
+
 from anyio import AsyncContextManagerMixin
 
 
 # Simplified version of StatsForStreamProcessing to only get simple time or space related information
 
-class StatsForStreamProcessing(AsyncContextManagerMixin):
 
-    def process_intent(self, intent):
-        stream_infos = stream_stats = stats_per_type = global_stats = None
+class StatePoller(AsyncContextManagerMixin):
 
-        if intent.intentType & StatsIntentType.STREAM_INFOS.value == StatsIntentType.STREAM_INFOS.value:
-            stream_infos = list(self._stats_stream._stream_statuses.values())
+    def __init__(self, external_state: object | Callable):
+        self._external_state = external_state
 
-        if intent.intentType & StatsIntentType.STREAM_STATS.value == StatsIntentType.STREAM_STATS.value:
-            stream_stats = {
-                self._stats_stream._stream_infos[k]: {
-                    k2: convert_to_public(v2) for k2, v2 in v.items()
-                } for k, v in self._stats_stream._stream_stats.items()
-            }
+    def __aiter__(self):
+        return self
 
-        if intent.intentType & StatsIntentType.GLOBAL_STATS_PER_TYPE.value == StatsIntentType.GLOBAL_STATS_PER_TYPE.value:
-            stats_per_type = {
-                k: convert_to_public(v) for k, v in self._stats_stream._global_stats_per_type.items()
-            }
+    async def __anext__(self):
+        if self._resource_died:
+            raise StopAsyncIteration
+        return self.snapshot()
 
-        if intent.intentType & StatsIntentType.GLOBAL_STATS.value == StatsIntentType.GLOBAL_STATS.value:
-            global_stats = GlobalStreamStats(
-                **{
-                    **self._stats_stream._global_stats.dict(),
-                    'timeStats': self._stats_stream._global_stats.timeStats.public
-                }
-            )
+    @contextlib.asynccontextmanager
+    async def __asynccontextmanager__(self) -> AsyncIterator:
+        self._resource_died = False
+        try:
+            yield
+        finally:
+            self._resource_died = True
 
-        return StatsOutput(
-            streamInfos=stream_infos,
-            streamStats=stream_stats,
-            statsPerType=stats_per_type,
-            globalStats=global_stats
-        )
+    def snapshot(self):
+        if hasattr(self._external_state, '__call__'):
+            return self._external_state()
+        else:
+            return self._external_state
 
-    @asynccontextmanager
-    async def __asynccontextmanager__(self):
-        self._stats_stream = current_stats_stream.get()
 
-        remote_send_orders, local_receive_orders = create_memory_object_stream[StatsIntent](max_buffer_size=0)
-        local_send_stats, remote_receive_stats = create_memory_object_stream[StatsPerStream](max_buffer_size=0)
-
-        async def process():
-            async with (
-                local_receive_orders,
-                local_send_stats
-            ):
-                async for intent in local_receive_orders:
-                    await local_send_stats.send(self.process_intent(intent))
-
-        async with create_task_group() as tg:
-            tg.start_soon(process)
-            yield remote_send_orders, remote_receive_stats
-
-def run(self, data: bytes) -> CompressionResult:
+def run(self, data: bytes):
     compressed, c_ms = self.compress(data)
     decompressed, d_ms = self.decompress(compressed)
     orig = len(data)

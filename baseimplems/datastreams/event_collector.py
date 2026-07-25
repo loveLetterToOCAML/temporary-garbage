@@ -11,8 +11,8 @@ from baseimplems.date_utils import utc_now
 from anyio import AsyncContextManagerMixin, create_task_group, create_memory_object_stream, get_cancelled_exc_class
 import anyio
 
-from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import Type, Callable, Awaitable
+from contextlib import asynccontextmanager
 from typing_extensions import AsyncIterator
 from contextvars import ContextVar
 from datetime import timedelta
@@ -109,7 +109,7 @@ class EventCollector(AsyncContextManagerMixin):
 
     def next_stream_event_collector(self, f_name: str) -> StreamEventStream:
         idx, self._current_stream_index = self._current_stream_index, self._current_stream_index + 1
-        return StreamEventStream(f_name, idx, utc_now(), (randint(0, 0xffffffff)))
+        return StreamEventStream(f_name, idx, utc_now(), randint(0, 0xffffffff))
 
 
 @asynccontextmanager
@@ -149,7 +149,7 @@ async def next_stream_event_collector(f_name, send_start_event: bool = True) -> 
         reason = StreamEndReason.EXCEPTION_DURING_PROCESS
         raise
     except Exception as e:
-        print("CAUGH2", type(e))
+        print("CAUGHT2", type(e))
         raise e
     finally:
         await sec.new_stream_end_event(reason)

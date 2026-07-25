@@ -2,30 +2,18 @@ from __future__ import annotations
 
 from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent, MultiplePydanticFilerException, \
     NotExistingPlaceholderForUpload
-from filer.filer_server.server_base import FilerServerParameters, BackendFailureType
+from filer.filer_server.server_base import FilerServerParameters, BackendFailureType, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.backend_failure import BackendFailure
-from filer.filer_server.server_factory import FilerServerFor
 
 from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
 
-from typing import TypeVar, AsyncIterator, Protocol
 from contextlib import asynccontextmanager
+from typing import TypeVar, AsyncIterator
 
 
-class HashableWithBytesRepr(Protocol):
-    def __hash__(self) -> int:
-        ...
-
-    def __eq__(self, other) -> bool:
-        ...
-
-    def __bytes__(self) -> bytes:
-        ...
-
-
-HashType = TypeVar('HashType', bound=HashableWithBytesRepr)
+HashType = TypeVar('HashType', bound=PydanticHashableWithBytesRepr)
 
 
 class FilerServerChainParameters(BaseModel):
@@ -179,6 +167,8 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
+        from filer.filer_server.server_factory import FilerServerFor
+
         self._faster = FilerServerFor(self._faster_params)
         self._slower = FilerServerFor(self._slower_params)
         self._prepared_placeholders_for = {}

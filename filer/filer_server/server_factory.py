@@ -1,5 +1,3 @@
-from contextlib import asynccontextmanager
-
 from filer.filer_server.common_servers import default_in_memory_filer_server_parameters, \
     default_fs_filer_server_parameters, default_sql_filer_server_parameters, \
     sql_filer_server_with_fs_registry_parameters
@@ -7,6 +5,7 @@ from filer.filer_server.server_choice import FilerServerMultipleParameters, Effe
 from filer.filer_server.server_chain import FilerServerChainParameters, EffectfulFilerServerChain
 from filer.filer_server.server_base import FilerServerParameters, EffectfulFilerServer
 
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
 
@@ -42,6 +41,7 @@ if __name__ == '__main__':
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
     from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy
     from basetypes.implementation.dataformat.hashed import Hashed, MixedMd5Sha256
+    from filer.filer_context import run_with_default_filer_persistence_config
     from policy.log import run_with_log_policy, LogLevel
 
     import anyio
@@ -50,9 +50,10 @@ if __name__ == '__main__':
     async def main():
         async with (
             run_with_log_policy(logLevel=LogLevel.INFO),
-            enclose_within_temporary_dir_interactive_mock() as main_dir,
+            enclose_within_temporary_dir_interactive_mock() as _,
             run_with_temporarily_persistent_mock_db_engine(echo=False),
             run_within_sqlalchemy() as _,
+            run_with_default_filer_persistence_config()
         ):
             f1 = FilerServerFor(sql_filer_server_with_fs_registry_parameters())
             fscp = FilerServerChainParameters(
@@ -65,7 +66,12 @@ if __name__ == '__main__':
             )
             f2 = FilerServerFor(fscp2)
 
-            print(await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000))
-            print(await f2.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'b'), 0, 10001))
+            async with f1 as report1:
+                print(report1)
+                print(await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000))
+
+            async with f2 as report2:
+                print(report2)
+                print(await f2.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'b'), 0, 10001))
 
     anyio.run(main)

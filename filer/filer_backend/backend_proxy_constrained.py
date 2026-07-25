@@ -1,23 +1,29 @@
+from anyio import create_task_group, Lock
+
+from baseimplems.datastreams.constrained import StreamWatchguard
 from filer.base_exceptions import FilerSerialException, NotEnoughSpaceRemaining, FilerConstraintType, OutOfConstraints, \
     AlreadyUploadingContent, NotExistingPlaceholderForUpload, NotExistingContent
-from filer.filer_backend.backend_factory import KnownFilerBackendParameters
 from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
-from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackendWithContextManagement
+from filer.filer_backend.backend_impl_inmem import check_final_content_hash_exn, FilerBackendInMemParameters
 from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
+from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
 from baseimplems.datastreams.stream_event import StreamEvent, base_event_from
+from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
 from basetypes.implementation.dataformat.hashed import Hashed
-from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.interval_union import IntervalUnion
 from filer.filer_backend.utils_exn import SerialException
 from baseimplems.date_utils import utc_now
 
 from pydantic import BaseModel
 
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from random import randint
 
 
-class EffectParams(BaseModel):
+class ConstraintsParameters(BaseModel):
     concurrentParallelWrites: int = 0x40
     concurrentParallelReads: int = 0x100
     maximumContentSize: int = 0x400000000  # 16 Gb max
@@ -36,10 +42,13 @@ class GenericBackendParameters(BaseModel):
     allowedDeletion: bool = False
 
 
+KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | \
+                              RemoteBackendInContextParameters
+
 class ConstrainedBackendParameters(BaseModel):
     globalParameters: GenericBackendParameters = GenericBackendParameters()
     backendParameters: KnownFilerBackendParameters
-    effectParams: EffectParams = EffectParams()
+    constraintParameters: ConstraintsParameters = ConstraintsParameters()
 
     compressDataAlgorithm: CompressionAlgorithmInstance | None = None
     compressThreshold: float = 0.8  # when compressed data size < compressThreshold * size (& compressDataAlgorithm is true), will store compressed
@@ -48,38 +57,59 @@ class ConstrainedBackendParameters(BaseModel):
 # TODO: check_final_content_hash_exn
 
 """
-EffectfulConstrainedBackend is the most complete piece of policies applied at generic backend level
+EffectfulConstrainedFilerBackend is the most complete piece of policies applied at generic backend level
 
 Its role is both to ensure strict stream constraints are respected, as well as hashes are matching uploaded content
 It also has the role of checking if compression would be useful and apply it
 """
 
-class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
-
-    def __init__(self, params):
+class EffectfulConstrainedFilerBackend(
+    EffectfulFilerBackendWithContextManagement[Hashed, BackendFailure],
+    EffectfulBackend[Hashed, BackendFailure],
+):
+    def __init__(self, params: ConstrainedBackendParameters):
         self._params = params
+        self._constraints = params.constraintParameters
+
+    @asynccontextmanager
+    async def __asynccontextmanager__(self):
+        self._current_size = 0
         self._current_size_max = 0
         self._current_placeholder_index = 0
+        self._lock = Lock()
+
+        from filer.filer_backend.backend_factory import FilerBackendFor
+        self._internal = FilerBackendFor(self._params.backendParameters)
+        if isinstance(self._internal, EffectfulFilerBackendWithContextManagement) or hasattr(self._internal, '__asynccontextmanager__'):
+            async with (
+                self._internal,
+                create_task_group() as self._current_task_group
+            ):
+                yield
+        else:
+            async with create_task_group() as self._current_task_group:
+                yield
+
 
     async def size_of_content_at_exn(self, locator: Hashed) -> int:
         return await self._internal.size_of_content_at_exn(locator)
 
     async def prepare_placeholder_at_exn(self, locator: Hashed, placeholder_index: int, total_size: int):
-        if not self._params.allowedWrite:
+        if not self._params.globalParameters.allowedWrite:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.NO_UPLOAD
                 )
             )
 
-        if total_size > self._params.maximumContentSize:
+        if total_size > self._constraints.maximumContentSize:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MAX_TOTAL_SIZE
                 )
             )
 
-        if total_size < self._params.minimumContentSize:
+        if total_size < self._constraints.minimumContentSize:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MIN_TOTAL_SIZE
@@ -94,15 +124,16 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
                 )
             )
 
-        if self._current_size_max + total_size > self._params.storageSize:
-            raise FilerSerialException(
-                NotEnoughSpaceRemaining(
-                    requestedSize=total_size,
-                    remainingSize=self._params.storageSize - self._current_size_max
-                )
-            )
+        # Not handled here: only a filer server has the full view of backend init listing all, and registry containing sizes
+        #if self._current_size_max + total_size > self._params.storageSize:
+        #    raise FilerSerialException(
+        #        NotEnoughSpaceRemaining(
+        #            requestedSize=total_size,
+        #            remainingSize=self._params.storageSize - self._current_size_max
+        #        )
+        #    )
 
-        result = await self._internal.prepare_placeholder_at(locator, self._current_placeholder_index)
+        result = await self._internal.prepare_placeholder_for_hash_exn(locator, self._current_placeholder_index, total_size)
         if isinstance(result, RegistryFailure):
             raise result.originalException
         self._current_task_group.start_soon(self._safe_upload_monitoring, locator, total_size)
@@ -124,7 +155,7 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
     async def _start_upload_monitoring(self, locator: Hashed, placeholder_index: int):
         async with (
-            StreamWithConstraints(self._upload_stream_constraints) as \
+            StreamWatchguard(self._upload_stream_constraints) as \
                 (remote_send_stream, remote_send_constraint_intent, remote_receive_constraint_info),
                 remote_send_stream,
                 remote_send_constraint_intent,
@@ -146,7 +177,7 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
 
     async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
-        if not self._params.allowedWrite:
+        if not self._params.globalParameters.allowedWrite:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.NO_UPLOAD
@@ -154,14 +185,14 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
             )
 
         size = len(data)
-        if size > self._params.maximumSizeWrite:
+        if size > self._constraints.maximumSizeWrite:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MAX_CHUNK_SIZE
                 )
             )
 
-        if size < self._params.minimumSizeWrite:
+        if size < self._constraints.minimumSizeWrite:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MIN_CHUNK_SIZE
@@ -176,9 +207,9 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
                 )
             )
 
-        if self._params.fixedChunkSize and size != self._params.fixedChunkSize and \
-                ((offset % self._params.fixedChunkSize) != 0 or
-                 self._expected_total_size_for[placeholder_index] - offset >= self._params.fixedChunkSize):
+        if self._constraints.fixedChunkSize and size != self._constraints.fixedChunkSize and \
+                ((offset % self._constraints.fixedChunkSize) != 0 or
+                 self._expected_total_size_for[placeholder_index] - offset >= self._constraints.fixedChunkSize):
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.FIXED_CHUNK_SIZE_EXPECTED
@@ -245,21 +276,21 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
 
 
     async def download_chunk_from_exn(self, locator: Hashed, offset: int, size: int) -> bytes:
-        if not self._params.allowedRead:
+        if not self._constraints.globalParameters.allowedRead:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.NO_DOWNLOAD
                 )
             )
 
-        if size > self._params.maximumSizeRead:
+        if size > self._constraints.maximumSizeRead:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MAX_CHUNK_SIZE
                 )
             )
 
-        if size < self._params.minimumSizeRead:
+        if size < self._constraints.minimumSizeRead:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.MIN_CHUNK_SIZE
@@ -277,7 +308,7 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
         return await self._internal.download_chunk_for_hash_exn(locator, offset, size)
 
     async def delete_resource_at_exn(self, locator: Hashed, placeholder_index: int = -1):
-        if not self._params.allowedDelete:
+        if not self._params.globalParameters.allowedDelete:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.NO_DELETION
@@ -301,19 +332,19 @@ class EffectfulConstrainedBackend(EffectfulBackend[Hashed, BackendFailure]):
             self._current_size -= sz
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Hashed]:
-        for hash in self._internal._list_resources_reorganize_exn():
+        async for hash in self._internal._list_resources_reorganize_exn():
             yield hash
 
     def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,
-                humanMessage=exn.serialized.humanMessage or 'FilerException::EffectfulConstrainedBackend exception',
+                humanMessage=exn.serialized.humanMessage or 'FilerException::EffectfulConstrainedFilerBackend exception',
                 retryable=False
             )
         return BackendFailure(
             failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
-            humanMessage='FilerException::EffectfulConstrainedBackend::InternalError',
+            humanMessage='FilerException::EffectfulConstrainedFilerBackend::InternalError',
             retryable=False,
             originalException=exn
         )

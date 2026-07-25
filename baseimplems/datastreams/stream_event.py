@@ -11,15 +11,15 @@ from enum import Enum
 
 # rel time is relative to the beginning of the upper stream or of the current task for the first stream
 class BaseEvent(BaseModel):
-    absTime: datetime
     relTime: timedelta
+    absTime: datetime
 
 
-def base_event_from(start: datetime):
+def base_event_from(start: datetime | None = None):
     now = utc_now()
     return {
         'absTime': now,
-        'relTime': now - start
+        'relTime': (now - start) if start else timedelta(0)
     }
 
 
@@ -46,9 +46,12 @@ class StreamEndReason(Enum):
 class StreamStarting(StreamEvent):
     details: RootSerial | None = None
 
+class StreamInProgress(StreamEvent):
+    pass
+
 class StreamEnding(StreamEvent):
     reason: StreamEndReason
-
+    details: RootSerial | BaseModel | str | None = None
 
 
 class TransitStatus(Enum):
@@ -91,3 +94,17 @@ class ObjectStreamEvent(WithTransitInformation):
 class SleepEvent(StreamEvent):
     type: Literal[StreamEventType.SLEEP_EVENT] = StreamEventType.SLEEP_EVENT
     delay: DefaultBaseType.TIMEDELTA
+
+
+def event_payload_size(stream_event: StreamEvent):
+    match stream_event:
+        case BytesStreamEvent():
+            return stream_event.size
+        case ChunkStreamEvent():
+            return stream_event.size
+        case ObjectStreamEvent():
+            return 1
+        case SleepEvent():
+            return 0
+        case _:
+            raise NotImplementedError

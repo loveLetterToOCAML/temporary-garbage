@@ -57,7 +57,12 @@ class ContextVarPropertyWrapper(Generic[T]):
         self._attr = attr_name
 
     def get(self):
-        return getattr(self._ctxt_var.get(), self._attr)
+        try:
+            value = self._ctxt_var.get()
+        except LookupError:
+            from baseimplems.anyio_utils import AsyncContextManagerDependencyNotEntered
+            raise AsyncContextManagerDependencyNotEntered(self._ctxt_var, self._ctxt_var.name, 'ContextVarPropertyWrapper::get')
+        return getattr(value, self._attr)
 
 
 if __name__ == '__main__':

@@ -3,10 +3,10 @@ from __future__ import annotations
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
 from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
+from filer.filer_server.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
-from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
-from filer.filer_server.server_chain import HashableWithBytesRepr
-from filer.filer_backend.backend_effectful import IntegrityReport
+from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault, \
+    EffectfulFilerBackendWithContextManagement
 from filer.filer_backend.backend_factory import FilerBackendFor
 from basetypes.implementation.dataformat.hashed import Hashed
 
@@ -14,13 +14,13 @@ from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, TypeVar
+from typing import AsyncIterator, TypeVar, Generic
 
 
 ExternalResourceLocatorType = TypeVar('ExternalResourceLocatorType')
 BackendFailureType = TypeVar('BackendFailureType')
 UlidType = TypeVar('UlidType')
-HashType = TypeVar('HashType', bound=HashableWithBytesRepr)
+HashType = TypeVar('HashType', bound=PydanticHashableWithBytesRepr)
 
 
 class FilerServerInitParameters(BaseModel):
@@ -51,6 +51,7 @@ external users when performing actions
 """
 class EffectfulFilerServer(
     EffectfulFilerBackendDefault[HashType, BackendFailure | RegistryFailure],
+    Generic[HashType, ExternalResourceLocatorType],
     AsyncContextManagerMixin
 ):
     def __init__(self, server_params: FilerServerParameters):
@@ -60,15 +61,26 @@ class EffectfulFilerServer(
         self._registry_params = server_params.registryParameters
 
     @asynccontextmanager
+    async def enter_internal(self):
+        async with (
+            self._registry,
+            self.ensure_coherent_at_start_and_stop() as report
+        ):
+            yield report
+
+    @asynccontextmanager
     async def __asynccontextmanager__(self):
         self._backend = FilerBackendFor(self._backend_params)
         self._registry = FilerRegistryFor(self._registry_params)
-        async with (
-            self._backend,
-            self._registry,
-        ):
-            yield
-
+        if isinstance(self._backend, EffectfulFilerBackendWithContextManagement) or hasattr(self._backend, '__asynccontextmanager__'):
+            async with (
+                self._backend,
+                self.enter_internal() as report
+            ):
+                yield report
+        else:
+            async with self.enter_internal() as report:
+                yield report
 
     async def size_of_content_at_exn(self, locator: HashType) -> int:
         sz = await self._registry.size_for_hash_exn(hash)
@@ -135,20 +147,52 @@ class EffectfulFilerServer(
             await self._registry.delete_item_exn(locator)
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Hashed]:
-        for hash in self._backend._list_resources_reorganize_exn():
+        async for hash in self._backend._list_resources_reorganize_exn():
             yield hash
 
     def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:
-        return self._backend.exception_to_registry_failure(exn)
+        raise exn
+        # return self._backend.exception_to_registry_failure(exn)
+
+    async def craft_integrity_report(self, delete_bad: bool = False, check_integrity: bool = False):
+        unexpected_items = {}
+        content_not_matching_content = {}
+        good_contents = []
+        unknown_contents = []
+        async for locator in self._list_resources_reorganize_exn():
+            hash = self.hash_from_resource_locator(locator)
+            if not hash:
+                unexpected_items[locator] = True
+                if delete_bad:
+                    self.delete_raw_resource_exn(locator)
+                continue
+
+            if check_integrity:
+                if self.check_integrity_for_exn(hash):
+                    good_contents.append(hash)
+                elif delete_bad:
+                    self.delete_raw_resource_exn(locator)
+                    content_not_matching_content[hash] = True
+                else:
+                    content_not_matching_content[hash] = False
+            else:
+                unknown_contents.append(hash)
+        return IntegrityReport[HashType, ExternalResourceLocatorType](
+            unexpectedItems=unexpected_items,
+            contentNotMatchingHashes=content_not_matching_content,
+            contentMatchingHashes=good_contents,
+            contentUnknownMatchingHashes=unknown_contents
+        )
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self):
+    async def ensure_coherent_at_start_and_stop(self):
+        allowed_deletion = self._global_params.globalParameters.allowedDeletion
         if self._init_parameters:
-            allowed_deletion = self._global_params.globalParameters.allowedDeletion
-
-            self.startup_metadata_report = IntegrityReport[HashType, UlidType]()
+            self.startup_metadata_report = IntegrityReport[HashType, ExternalResourceLocatorType]()
             if self._init_parameters.cacheMetadataAtStartup:
-                self.startup_metadata_report = self.ensure_integrity(delete_bad=allowed_deletion)
+                self.startup_metadata_report = await self.craft_integrity_report(
+                    delete_bad=allowed_deletion, check_integrity=self._init_parameters.onlyCheckIntegrityAtDownloadTime
+                )
 
             if self._init_parameters.throwIfNotExpected and self.startup_metadata_report.unexpectedItems:
                 raise UnexpectedItems(self.startup_metadata_report.unexpectedItems)
@@ -160,7 +204,7 @@ class EffectfulFilerServer(
             yield self.startup_metadata_report
         finally:
             if self._init_parameters and not self._init_parameters.allowedExternalModifications and allowed_deletion:  # this case redo a full integrity check
-                final_report = self.ensure_integrity(delete_bad=allowed_deletion)
+                final_report = await self.craft_integrity_report(delete_bad=allowed_deletion)
                 for fname in final_report.unexpectedItems:
                     self.delete_content(fname)
                 for hash in final_report.contentNotMatchingHashes:

@@ -1,10 +1,10 @@
+from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.filer_context import file_registry_path_for, sqlite_registry_path_for, file_backend_basepath_for
 from filer.filer_common.registry_factory import InMemRegistryParameters, DbRegistryWithSqlitePathParameters
 from filer.filer_server.server_base import FilerServerParameters, FilerServerInitParameters
 from basetypes.implementation.dataformat.compression import Lz4, LZ4CompressionParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
-from filer.filer_backend.backend_factory import DbBackendInContextParameters
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
 from filer.filer_common.registry_fs import FsRegistryParameters
 
@@ -30,8 +30,7 @@ allowed_deletion_params = GenericBackendParameters(
 
 def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persistence: PersistenceType, name: str | None = None,
                          global_parameters: GenericBackendParameters = GenericBackendParameters(),
-                         init_parameters: FilerServerInitParameters | None = FilerServerInitParameters(),
-                         compression_level: int = 3, compression_threshold: float = 0.8):
+                         init_parameters: FilerServerInitParameters | None = FilerServerInitParameters()):
     match backend_persistence:
         case PersistenceType.IN_MEMORY:
             backend = default_constrained_inmem_backend()
@@ -65,13 +64,7 @@ def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persiste
     return FilerServerParameters(
         globalParameters=global_parameters,
         initParameters=init_parameters,
-        backendParameters=ConstrainedBackendParameters(
-            globalParameters=global_parameters,
-            backendParameters=backend,
-            # favor speed over compression
-            compressDataAlgorithm=Lz4(compressionParameters=LZ4CompressionParameters(compressionLevel=compression_level)),
-            compressThreshold=compression_threshold
-        ),
+        backendParameters=backend,
         registryParameters=registry
     )
 
@@ -106,7 +99,7 @@ def default_in_memory_filer_server_parameters():
     # full in mem backend + registry, no persistence so no initParameters
     return FilerServerParamsFor(
         PersistenceType.IN_MEMORY, PersistenceType.IN_MEMORY,
-        init_parameters=None, compression_level=1, compression_threshold=0.7
+        init_parameters=None,
     )
 
 def in_memory_filer_server_parameters_with_hash_memory(name: str | None = None):

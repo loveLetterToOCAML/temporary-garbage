@@ -12,6 +12,7 @@ from basetypes.implementation.dataformat.compression import CompressionAlgorithm
 from typing import AsyncIterator, TypeVar, Generic
 
 from filer.base_exceptions import HashNotMatchingContent, FilerSerialException
+from filer.filer_backend.backend_factory import FilerBackendFor, KnownFilerBackendParameters
 
 LocatorType = TypeVar('LocatorType')
 
@@ -79,7 +80,7 @@ class DownloadHandler:
 
 class FilerBackendClient(Generic[LocatorType]):
 
-    def __init__(self, backend_params: EffectfulFilerBackend):
+    def __init__(self, backend_params: KnownFilerBackendParameters):
         self._backend_params = backend_params
         self._read_limiter = None
         self._write_limiter = None
@@ -91,7 +92,7 @@ class FilerBackendClient(Generic[LocatorType]):
             create_task_group() as tg,
             chunk_receiver
         ):
-            upload_handler = UploadHandler(chunk_receiver)
+            upload_handler = UploadHandler(chunk_receiver, locator, expected_length)
             tg.start_soon(upload_handler.handle_upload, self._write_limiter)
             yield chunk_sender
 
@@ -121,13 +122,13 @@ class FilerBackendClient(Generic[LocatorType]):
             create_task_group() as tg,
             chunk_sender
         ):
-            download_handler = DownloadHandler(chunk_sender)
+            download_handler = DownloadHandler(chunk_sender, locator)
             tg.start_soon(download_handler.handle_download, self._read_limiter)
             yield chunk_receiver
 
     async def download_data_to(self, locator: LocatorType, chunk_sender: MemoryObjectSendStream[bytes]):
         async with chunk_sender:
-            download_handler = DownloadHandler(chunk_sender)
+            download_handler = DownloadHandler(chunk_sender, locator)
             self._task_group.start_soon(download_handler.handle_download, self._read_limiter)
 
     async def delete_data(self, locator: LocatorType):
@@ -139,7 +140,7 @@ class FilerBackendClient(Generic[LocatorType]):
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
-        self._backend = FilerBackendFactory(self._backend_params)
+        self._backend = FilerBackendFor(self._backend_params)
         self._read_limiter = CapacityLimiter(self._client_params.concurrentParallelReads)
         self._write_limiter = CapacityLimiter(self._client_params.concurrentParallelWrites)
 
@@ -154,73 +155,3 @@ class FilerBackendClient(Generic[LocatorType]):
             self._backend
         ):
             yield self
-
-
-class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, BackendFailureType]):
-    """Encapsulation of some EffectfulBackend with final auto safe (no exception) functions, only locator conversion must be implemented"""
-
-    @property
-    def _effectful_backend(self) -> EffectfulBackend[ExternalResourceLocatorType, BackendFailureType]:
-        ...
-
-    def hash_from_resource_locator(self, locator: ExternalResourceLocatorType) -> HashType | None:
-        ...
-
-    def resource_locator_from_hash(self, hash: HashType) -> ExternalResourceLocatorType:
-        ...
-
-    @final
-    async def size_for_hash_exn(self, hash: HashType) -> int | None:
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.size_of_content_at_exn(locator)
-
-    @final
-    async def prepare_placeholder_for_hash_exn(self, hash: HashType, placeholder_index: int, total_size: int):
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.prepare_placeholder_at_exn(locator, placeholder_index, total_size)
-
-    @final
-    async def upload_chunk_for_hash_exn(self, hash: HashType, placeholder_index: int, offset: int, data: bytes) -> int:
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.upload_chunk_at_exn(locator, placeholder_index, offset, data)
-
-    @final
-    async def upload_terminate_for_hash_exn(self, hash: HashType, placeholder_index: int):
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.upload_terminate_at_exn(locator, placeholder_index)
-
-    @final
-    async def download_chunk_for_hash_exn(self, hash: HashType, offset: int, size: int) -> bytes:
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.download_chunk_from_exn(locator, offset, size)
-
-    @final
-    async def delete_content_exn(self, hash: HashType, placeholder_index: int = -1):
-        locator = self.resource_locator_from_hash(hash)
-        return await self._effectful_backend.delete_resource_at_exn(locator, placeholder_index)
-
-    @final
-    async def list_resources_reorganize_exn(self) -> AsyncIterator[ExternalResourceLocatorType]:
-        async for rsrc in self._effectful_backend._list_resources_reorganize_exn():
-            yield rsrc
-
-    @final
-    async def check_integrity_for_exn(self, hash: HashType, *, chunk_size: int = 0x1000000) -> bool:
-        with hash.compute_new() as h:
-            size = await self.size_for_hash_exn(hash)
-            for offset in range(0, size, chunk_size):
-                h.update(await self.download_chunk_for_hash_exn(hash, offset, chunk_size))
-            return h.is_same()
-
-    @final
-    def serialized_exception(self, exn: Exception) -> BackendFailureType:
-        return self._effectful_backend.exception_to_registry_failure(exn)
-
-    size_for_hash = final(encapsulate_exception(serialized_exception, size_for_hash_exn))
-    prepare_placeholder_for_hash = final(encapsulate_exception(serialized_exception, prepare_placeholder_for_hash_exn))
-    upload_chunk_for_hash = final(encapsulate_exception(serialized_exception, upload_chunk_for_hash_exn))
-    upload_terminate_for_hash = final(encapsulate_exception(serialized_exception, upload_terminate_for_hash_exn))
-    download_chunk_for_hash = final(encapsulate_exception(serialized_exception, download_chunk_for_hash_exn))
-    delete_content = final(encapsulate_exception(serialized_exception, delete_content_exn))
-    check_integrity_for = final(encapsulate_exception(serialized_exception, check_integrity_for_exn))
-    list_resources_reorganize = final(encapsulate_exception(serialized_exception, list_resources_reorganize_exn))

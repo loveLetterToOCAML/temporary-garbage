@@ -1,8 +1,10 @@
 from basetypes.implementation.dataformat.hashed import HashContextProtocol
 
-from typing import Protocol, final, Callable, TypeVar, AsyncIterator, Self
-from functools import wraps
+from anyio import AsyncContextManagerMixin
 
+from typing import Protocol, final, Callable, TypeVar, AsyncIterator, Self
+from contextlib import asynccontextmanager
+from functools import wraps
 import traceback
 import sys
 
@@ -107,6 +109,10 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
         return await self._effectful_backend.delete_resource_at_exn(locator, placeholder_index)
 
     @final
+    async def delete_raw_resource_exn(self, locator: ExternalResourceLocatorType):
+        return await self._effectful_backend.delete_resource_at_exn(locator)
+
+    @final
     async def list_resources_reorganize_exn(self) -> AsyncIterator[ExternalResourceLocatorType]:
         async for rsrc in self._effectful_backend._list_resources_reorganize_exn():
             yield rsrc
@@ -129,6 +135,7 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
     upload_terminate_for_hash = final(encapsulate_exception(exception_to_backend_failure, upload_terminate_for_hash_exn))
     download_chunk_for_hash = final(encapsulate_exception(exception_to_backend_failure, download_chunk_for_hash_exn))
     delete_content = final(encapsulate_exception(exception_to_backend_failure, delete_content_exn))
+    delete_raw_resource = final(encapsulate_exception(exception_to_backend_failure, delete_raw_resource_exn))
     check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
     list_resources_reorganize = final(encapsulate_exception(exception_to_backend_failure, list_resources_reorganize_exn))
 
@@ -150,3 +157,15 @@ class EffectfulFilerBackendDefault(EffectfulBackend[ExternalResourceLocatorType,
     @final
     def resource_locator_from_hash(self, hash: ExternalResourceLocatorType) -> ExternalResourceLocatorType:
         return hash
+
+
+class EffectfulFilerBackendWithContextManagement(
+    EffectfulFilerBackendDefault[ExternalResourceLocatorType, BackendFailureType],
+    AsyncContextManagerMixin
+):
+    """In case the filer backend needs context initialization (authentication to external service as instance, or any
+        task group to handle subtasks), this version of filer backend imposes to use the AsyncContextManagerMixin"""
+    # this also creates a dependency to anyio : TODO: is it really something we need to depend on here?
+    @asynccontextmanager
+    async def __asynccontextmanager__(self):
+        ...

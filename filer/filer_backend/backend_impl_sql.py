@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.exc import NoResultFound
 from sortedcontainers import SortedDict
+from pydantic import BaseModel
 from anyio import Lock
 
 from typing import AsyncIterator
@@ -46,6 +47,10 @@ class TemporaryChunkForHash(*BaseMixins, WithID):
     content: Mapped[bytes] = mapped_column(LargeBinary(2**32-1), nullable=False)
     start: Mapped[int] = mapped_column(Integer)
     end: Mapped[int] = mapped_column(Integer)
+
+
+class DbBackendInContextParameters(BaseModel):  # no params with DB name / remote SQL DB, as 1 engine per process must be enforced, so we draw dependency here to the with_auto_session_kwargs decorator
+    pass
 
 
 class EffectfulFilerSqlBackend(EffectfulFilerBackend[Hashed, ContentForHash, BackendFailure], EffectfulBackend[ContentForHash, BackendFailure]):
