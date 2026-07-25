@@ -1,7 +1,7 @@
 from filer.base_exceptions import NotExistingContent, NotEnoughSpaceRemaining, FilerSerialException, \
-    AlreadyUploadingContent, NotExistingPlaceholderForUpload, AlreadyUploadedContent, HashNotMatchingContent
+    AlreadyUploadingContent, NotExistingPlaceholderForUpload, HashNotMatchingContent
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailureType, ExternalFailure
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend, EffectfulFilerBackendDefault
+from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
 from filer.filer_backend.interval_union_bytes import BytesIntervalUnion
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.filer_backend.utils_exn import SerialException

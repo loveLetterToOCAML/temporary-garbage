@@ -39,13 +39,13 @@ current_watchguard_index = ContextVar[int]('current_stream_watchguard_index', de
 
 class StreamWatchguard(AsyncContextManagerMixin):
 
-    def __init__(self, params: StreamConstraints):
+    def __init__(self, params: StreamConstraints, watchguard_name: str | None = None):
         self._params = params
         self._total_time_max = self._params.bootstrapDelaySeconds + self._params.maximumStreamDurationSeconds
         idx = current_watchguard_index.get()
         current_watchguard_index.set(idx + 1)
         self._stream_identifier = {
-            'name': 'stream-watchguard',
+            'name': watchguard_name or 'stream-watchguard',
             'index': idx,
             'randomId': randint(0, 0xffffffff),
         }

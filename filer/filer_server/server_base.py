@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault, EffectfulFilerBackendWithContextManagement
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
 from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
 from filer.filer_server.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
-from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault, \
-    EffectfulFilerBackendWithContextManagement
 from filer.filer_backend.backend_factory import FilerBackendFor
 from basetypes.implementation.dataformat.hashed import Hashed
 
 from anyio import AsyncContextManagerMixin
 from pydantic import BaseModel
 
-from contextlib import asynccontextmanager
 from typing import AsyncIterator, TypeVar, Generic
+from contextlib import asynccontextmanager
 
 
 ExternalResourceLocatorType = TypeVar('ExternalResourceLocatorType')

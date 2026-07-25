@@ -92,8 +92,9 @@ class PredicateType(Enum):
 T = TypeVar('T')
 
 class ExpectedAgainstReality(BaseModel, Generic[T]):
-    ExpectationType: PredicateType
-    referenceValue: T
+    expectationType: PredicateType
+    reference: T
+    got: T
 
 class OutOfConstraints(PydanticFilerException):
     failedConstraint: FilerConstraintType

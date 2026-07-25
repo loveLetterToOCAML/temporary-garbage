@@ -1,10 +1,10 @@
-from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.filer_context import file_registry_path_for, sqlite_registry_path_for, file_backend_basepath_for
 from filer.filer_common.registry_factory import InMemRegistryParameters, DbRegistryWithSqlitePathParameters
 from filer.filer_server.server_base import FilerServerParameters, FilerServerInitParameters
 from basetypes.implementation.dataformat.compression import Lz4, LZ4CompressionParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
+from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
 from filer.filer_common.registry_fs import FsRegistryParameters
 
@@ -14,11 +14,10 @@ from enum import Enum
 class PersistenceType(Enum):
     IN_MEMORY = 1
     LOCAL_FS = 2
-    LOCAL_DB = 3
-    REMOTE_DB = 4
-    REMOTE_S3 = 5
-    REMOTE_GIT = 6
-    REMOTE_NETWORK = 7
+    IN_CONTEXT_DATABASE = 3
+    REMOTE_S3 = 4
+    REMOTE_GIT = 5
+    REMOTE_FILER = 6
 
 
 allowed_deletion_params = GenericBackendParameters(
@@ -40,7 +39,7 @@ def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persiste
             backend = default_constrained_fs_backend(name or 'main')
             fs_type = 'fs'
             name = name or 'main'
-        case PersistenceType.LOCAL_DB:
+        case PersistenceType.IN_CONTEXT_DATABASE:
             backend = default_constrained_sql_backend()
             fs_type = 'sql'
             name = name or 'main'
@@ -54,7 +53,7 @@ def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persiste
             registry = FsRegistryParameters(
                 filename=file_registry_path_for(fs_type, name)
             )
-        case PersistenceType.LOCAL_DB:
+        case PersistenceType.IN_CONTEXT_DATABASE:
             registry = DbRegistryWithSqlitePathParameters(
                 dbFilename=sqlite_registry_path_for(fs_type, name)
             )
@@ -111,7 +110,7 @@ def in_memory_filer_server_parameters_with_hash_memory(name: str | None = None):
 def default_fs_filer_server_parameters(name: str | None = None):
     # fs backend with sqlite registry
     return FilerServerParamsFor(
-        PersistenceType.LOCAL_DB, PersistenceType.LOCAL_FS,
+        PersistenceType.IN_CONTEXT_DATABASE, PersistenceType.LOCAL_FS,
         name=name
     )
 
@@ -125,13 +124,13 @@ def fs_filer_server_with_fs_registry_parameters(name: str | None = None):
 def default_sql_filer_server_parameters(name: str | None = None):
     # sqlite backend with sqlite registry
     return FilerServerParamsFor(
-        PersistenceType.LOCAL_DB, PersistenceType.LOCAL_DB,
+        PersistenceType.IN_CONTEXT_DATABASE, PersistenceType.IN_CONTEXT_DATABASE,
         name=name
     )
 
 def sql_filer_server_with_fs_registry_parameters(name: str | None = None):
     # sqlite backend with fs registry
     return FilerServerParamsFor(
-        PersistenceType.LOCAL_FS, PersistenceType.LOCAL_DB,
+        PersistenceType.LOCAL_FS, PersistenceType.IN_CONTEXT_DATABASE,
         name=name
     )

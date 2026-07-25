@@ -119,7 +119,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
         ):
             await f.seek(offset)
             result = await f.read(size)
-            self._fs_lgr.info(f"File read at {locator} from {offset} ({size} bytes)",
+            self._fs_lgr.info(f"File read at {locator} from {offset} ({size} bytes max, got {len(result)} bytes)",
                               fs_side_effect_for(FsReadContent(fromOffset=offset, expectedSizeToRead=size, sizeRead=len(result)), locator))
             return result
 
@@ -216,7 +216,6 @@ if __name__ == '__main__':
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
 
     import anyio
-
 
     data = b'x' * 0x1000
     chosenHashAlg = MixedMd5Sha256()

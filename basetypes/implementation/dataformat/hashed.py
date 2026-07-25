@@ -1,9 +1,9 @@
+from pydantic import BaseModel
+
 from typing import Protocol, final, Iterator, Type, Callable, Any, Literal
 from hashlib import sha256, sha512, md5
 from contextlib import contextmanager
 from enum import Enum
-
-from pydantic import BaseModel
 
 
 class HashAlgorithm(Enum):
