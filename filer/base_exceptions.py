@@ -11,7 +11,7 @@ from enum import Enum
 
 class FilerExceptionType(Enum):
     NotExistingContent = 1
-    NotExistingPlaceholderForUpload = 2
+    NotExistingPlaceholder = 2
     HashNotMatchingContent = 3
     AlreadyUploadedContent = 4
     AlreadyUploadingContent = 5
@@ -20,9 +20,10 @@ class FilerExceptionType(Enum):
     OutOfConstraints = 8
     AlreadyUploadedChunk = 9
     BadChunkUploaded = 10
-    PermanentContent = 11
-    BadDeletionKey = 12
-    DeletionKeyRequired = 13
+    BadOffset = 11
+    PermanentContent = 12
+    BadDeletionKey = 13
+    DeletionKeyRequired = 14
 
 
 class PydanticFilerException(PydanticException):
@@ -38,7 +39,7 @@ class WithInputUlidAndHash(PydanticFilerException):
 class NotExistingContent(WithInputUlidAndHash):
     hasExisted: bool | None = None
 
-class NotExistingPlaceholderForUpload(WithInputUlidAndHash):
+class NotExistingPlaceholder(WithInputUlidAndHash):
     placeholderIndex: int
 
 class HashNotMatchingContent(WithInputUlidAndHash):
@@ -100,13 +101,17 @@ class OutOfConstraints(PydanticFilerException):
     failedConstraint: FilerConstraintType
     details: ExpectedAgainstReality | None = None
 
-class AlreadyUploadedChunk(PydanticFilerException):
+class AlreadyUploadedChunk(WithInputUlidAndHash):
     chunkIndex: int
 
-class BadChunkUploaded(PydanticFilerException):
+class BadChunkUploaded(WithInputUlidAndHash):
     chunkIndex: int
     expectedSize: int
     receivedSize: int
+
+class BadOffset(WithInputUlidAndHash):
+    askedOffset: int
+    dataSize: int
 
 class PermanentContent(WithInputUlidAndHash):
     pass

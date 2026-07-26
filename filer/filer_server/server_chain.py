@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent, MultiplePydanticFilerException, \
-    NotExistingPlaceholderForUpload
+    NotExistingPlaceholder
 from filer.filer_server.server_base import FilerServerParameters, BackendFailureType, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.backend_failure import BackendFailure
@@ -72,7 +72,7 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
     async def _check_placeholder_created_exn(self, hash: HashType, placeholder_index: int):
         if (hash, placeholder_index) not in self._prepared_placeholders_for:
             raise FilerSerialException(
-                NotExistingPlaceholderForUpload(
+                NotExistingPlaceholder(
                     inputHash=hash.hash,
                     placeholderIndex=placeholder_index
                 )

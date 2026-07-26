@@ -7,9 +7,16 @@ from filer.filer_backend.backend_failure import BackendFailure
 from basetypes.implementation.dataformat.hashed import Hashed
 
 from anyio import AsyncContextManagerMixin, TemporaryDirectory
+from pydantic import BaseModel
 
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import AsyncIterator, Any
+from pathlib import Path
+
+
+class FilerBackendFsCacheParameters(BaseModel):
+    proxyTo: KnownFilerBackendParameters
+    basePath: Path | None = None
 
 
 class EffectfulFsUploadCache(EffectfulBackend[Hashed, BackendFailure],
@@ -17,7 +24,7 @@ class EffectfulFsUploadCache(EffectfulBackend[Hashed, BackendFailure],
                              EnsureContentIntegrity,
                              AsyncContextManagerMixin):
 
-    def __init__(self, params: KnownFilerBackendParameters):
+    def __init__(self, params: FilerBackendFsCacheParameters):
         self._params = params
 
     @property
@@ -32,10 +39,14 @@ class EffectfulFsUploadCache(EffectfulBackend[Hashed, BackendFailure],
 
     @asynccontextmanager
     async def __asynccontextmanager__(self) -> AbstractAsyncContextManager:
-        async with TemporaryDirectory(suffix='.fscache') as d:
-            self._internal_cache = EffectfulFilerFsBackend(FilerBackendFsParameters(basePath=d))
-            self._target_backend = FilerBackendFor(self._params)
+        self._target_backend = FilerBackendFor(self._params.proxyTo)
+        if self._params.basePath:
+            self._internal_cache = EffectfulFilerFsBackend(FilerBackendFsParameters(basePath=self._params.basePath))
             yield self
+        else:
+            async with TemporaryDirectory(suffix='.fscache') as d:
+                self._internal_cache = EffectfulFilerFsBackend(FilerBackendFsParameters(basePath=d))
+                yield self
 
 
     async def size_of_content_at_exn(self, locator: Hashed) -> int:

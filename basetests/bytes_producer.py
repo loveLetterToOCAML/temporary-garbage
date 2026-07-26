@@ -1,5 +1,3 @@
-import os.path
-
 from baseimplems.datastreams.event_collector import next_stream_event_collector, current_stream_event_stream, \
     stream_event_collector, run_with_event_collector
 from baseimplems.datastreams.stream_event import TransitStatus
@@ -10,6 +8,7 @@ from contextlib import asynccontextmanager
 from functools import wraps
 from random import randint
 from enum import Enum
+import os.path
 
 
 def within_new_bytes_event_stream(f):
@@ -24,8 +23,18 @@ def within_new_bytes_event_stream(f):
     return res
 
 
-@within_new_bytes_event_stream
 async def create_random_stream(data_size=1000000000, max_bound=0x100000):
+    ctr = 0
+    while ctr < data_size:
+        sz = randint(1, max_bound)
+        data = bytes([randint(0, 255)] * sz)
+        ctr += len(data)
+        to_yield = data[:len(data) - ctr + data_size] if ctr > data_size else data
+        yield to_yield
+
+
+@within_new_bytes_event_stream
+async def create_collected_random_stream(data_size=1000000000, max_bound=0x100000):
     ctr = 0
     while ctr < data_size:
         sz = randint(1, max_bound)
@@ -69,7 +78,7 @@ class StreamType(Enum):
 
 async def produce_test_data(stream_type: StreamType, data_size=1000000000, *args):
     if stream_type is StreamType.RANDOM:
-        f = create_random_stream
+        f = create_collected_random_stream
     elif stream_type is StreamType.FIXED:
         f = create_big_fixed_stream
     else:
@@ -93,7 +102,7 @@ async def bytes_generator_to_stream(gen, *args, max_buffer_size=0x1000):
     async with create_task_group() as tg:
         async def producer():
             async with local_send_stream:
-                async for data in gen(*args):
+                async for data in (gen(*args) if hasattr(gen, '__call__') else gen):
                     await local_send_stream.send(data)
         tg.start_soon(producer)
         yield remote_receive_stream

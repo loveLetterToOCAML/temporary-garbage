@@ -1,4 +1,4 @@
-from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholderForUpload, \
+from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholder, \
     NotExistingContent
 from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance, \
     check_valid_hash_for_type, MixedMd5Sha256
@@ -182,7 +182,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
                 path = Path(exn.filename)
                 hash = EffectfulFilerFsBackend.hash_from_resource_locator(path)
                 if 'placeholder' in exn.filename:
-                    ser_exn = NotExistingPlaceholderForUpload(
+                    ser_exn = NotExistingPlaceholder(
                         inputHash=hash.hash,
                         placeholderIndex=int(path.name.split('.')[1])
                     )

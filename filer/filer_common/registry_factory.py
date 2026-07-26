@@ -13,14 +13,11 @@ class InMemRegistryParameters(BaseModel):
 class DbRegistryInContextParameters(BaseModel):
     pass
 
-class DbRegistryWithSqlitePathParameters(BaseModel):
-    dbFilename: str
-
 class RemoteRegistryInContext(BaseModel):
     pass
 
 
-KnownFilerRegistryParameters = FsRegistryParameters | InMemRegistryParameters | DbRegistryInContextParameters | DbRegistryWithSqlitePathParameters | RemoteRegistryInContext
+KnownFilerRegistryParameters = FsRegistryParameters | InMemRegistryParameters | DbRegistryInContextParameters | RemoteRegistryInContext
 
 
 class UlidWrapper(ULID):
@@ -51,13 +48,6 @@ def FilerRegistryFor(registry_params: KnownFilerRegistryParameters):
             # don't import sqlalchemy dependency if not required / not installed
             from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, DatabaseRegistryInContext
             return DatabaseRegistryInContext[bytes, SimpleRegistryMetadataSqlalchemy](
-                hash_type=bytes,
-                metadata_type=SimpleRegistryMetadataSqlalchemy
-            )
-        case DbRegistryWithSqlitePathParameters():
-            from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, SQLiteDatabaseRegistryCreateDbContext
-            return SQLiteDatabaseRegistryCreateDbContext[bytes, SimpleRegistryMetadataSqlalchemy](
-                DbRegistryWithSqlitePathParameters.dbFilename,
                 hash_type=bytes,
                 metadata_type=SimpleRegistryMetadataSqlalchemy
             )

@@ -122,7 +122,7 @@ class EffectfulFilerServer(
 
     async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
         await self._ensure_not_existing(locator)
-        await self._backend.upload_chunk_at_exn(locator, placeholder_index, offset, data)
+        return await self._backend.upload_chunk_at_exn(locator, placeholder_index, offset, data)
 
     async def upload_terminate_at_exn(self, locator: Hashed, placeholder_index: int):
         await self._ensure_not_existing(locator)
@@ -163,14 +163,14 @@ class EffectfulFilerServer(
             if not hash:
                 unexpected_items[locator] = True
                 if delete_bad:
-                    self.delete_raw_resource_exn(locator)
+                    await self.delete_raw_resource_exn(locator)
                 continue
 
             if check_integrity:
-                if self.check_integrity_for_exn(hash):
+                if await self.check_integrity_for_exn(hash):
                     good_contents.append(hash)
                 elif delete_bad:
-                    self.delete_raw_resource_exn(locator)
+                    await self.delete_raw_resource_exn(locator)
                     content_not_matching_content[hash] = True
                 else:
                     content_not_matching_content[hash] = False

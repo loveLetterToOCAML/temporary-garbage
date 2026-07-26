@@ -42,6 +42,13 @@ class EnsureContentIntegrity(Protocol[HashType]):
             pass
 
 
+async def is_hash_valid_for_exn(hash: Hashed, content_iterator: AsyncIterator[bytes] | None = None):
+    if hash in cache_of_validated_hashes.get():
+        return True
+    await check_final_content_hash_async_exn(hash, content_iterator)
+    cache_of_validated_hashes.add_valid(hash)
+
+
 class CacheOfValidHashes(AsyncContextManagerMixin):
 
     def __init__(self):

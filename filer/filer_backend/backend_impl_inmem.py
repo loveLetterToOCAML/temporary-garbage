@@ -1,5 +1,5 @@
 from filer.base_exceptions import NotExistingContent, NotEnoughSpaceRemaining, FilerSerialException, \
-    AlreadyUploadingContent, NotExistingPlaceholderForUpload, HashNotMatchingContent
+    AlreadyUploadingContent, NotExistingPlaceholder, HashNotMatchingContent
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailureType, ExternalFailure
 from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
 from filer.filer_backend.interval_union_bytes import BytesIntervalUnion
@@ -87,7 +87,7 @@ class EffectfulFilerInMemBackend(EffectfulFilerBackendDefault[Hashed, BackendFai
     async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
         if placeholder_index not in self._temporaryfiles_per_placeholder_index:
             raise FilerSerialException(
-                NotExistingPlaceholderForUpload(
+                NotExistingPlaceholder(
                     inputHash=locator.hash,
                     placeholderIndex=placeholder_index
                 )

@@ -1,11 +1,12 @@
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
+from filer.filer_common.registry_factory import InMemRegistryParameters, DbRegistryInContextParameters
 from filer.filer_context import file_registry_path_for, sqlite_registry_path_for, file_backend_basepath_for
-from filer.filer_common.registry_factory import InMemRegistryParameters, DbRegistryWithSqlitePathParameters
 from filer.filer_server.server_base import FilerServerParameters, FilerServerInitParameters
 from basetypes.implementation.dataformat.compression import Lz4, LZ4CompressionParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
 from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
+from baseimplems.datastreams.constrained import StreamConstraints
 from filer.filer_common.registry_fs import FsRegistryParameters
 
 from enum import Enum
@@ -54,9 +55,7 @@ def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persiste
                 filename=file_registry_path_for(fs_type, name)
             )
         case PersistenceType.IN_CONTEXT_DATABASE:
-            registry = DbRegistryWithSqlitePathParameters(
-                dbFilename=sqlite_registry_path_for(fs_type, name)
-            )
+            registry = DbRegistryInContextParameters()
         case _:
             raise NotImplementedError
 
@@ -64,7 +63,7 @@ def FilerServerParamsFor(registry_persistence: PersistenceType, backend_persiste
         globalParameters=global_parameters,
         initParameters=init_parameters,
         backendParameters=backend,
-        registryParameters=registry
+        registryParameters=registry,
     )
 
 
@@ -74,7 +73,9 @@ def default_constrained_inmem_backend():
         backendParameters=FilerBackendInMemParameters(),
         # favor speed over compression
         compressDataAlgorithm=Lz4(compressionParameters=LZ4CompressionParameters(compressionLevel=1)),
-        compressThreshold=0.7
+        compressThreshold=0.7,
+        downloadConstraints=default_download_constraints,
+        uploadConstraints=default_upload_constraints,
     )
 
 def default_constrained_fs_backend(backend_name: str):
@@ -82,7 +83,9 @@ def default_constrained_fs_backend(backend_name: str):
         globalParameters=allowed_deletion_params,
         backendParameters=FilerBackendFsParameters(basePath=file_backend_basepath_for(backend_name)),
         compressDataAlgorithm=Lz4(compressionParameters=LZ4CompressionParameters(compressionLevel=3)),
-        compressThreshold=0.8
+        compressThreshold=0.8,
+        downloadConstraints=default_download_constraints,
+        uploadConstraints=default_upload_constraints,
     )
 
 def default_constrained_sql_backend():
@@ -90,8 +93,31 @@ def default_constrained_sql_backend():
         globalParameters=allowed_deletion_params,
         backendParameters=DbBackendInContextParameters(),
         compressDataAlgorithm=Lz4(compressionParameters=LZ4CompressionParameters(compressionLevel=3)),
-        compressThreshold=0.8
+        compressThreshold=0.8,
+        downloadConstraints=default_download_constraints,
+        uploadConstraints=default_upload_constraints,
     )
+
+default_upload_constraints = StreamConstraints(
+    maximumStreamDurationSeconds=10,
+    bootstrapDelaySeconds=0,
+    minBytesPerSecond=0x10000,
+    maxBytesPerSecond=0x4000000,
+    probeDelaySeconds=0.5,
+    backoffDelaySeconds=10,
+    toleratedFaults=3,
+    resetFaultsDelaySeconds=60
+)
+default_download_constraints = StreamConstraints(
+    maximumStreamDurationSeconds=900,
+    bootstrapDelaySeconds=10,
+    minBytesPerSecond=0x40000,
+    maxBytesPerSecond=0x10000000,
+    probeDelaySeconds=0.5,
+    backoffDelaySeconds=8,
+    toleratedFaults=3,
+    resetFaultsDelaySeconds=45
+)
 
 
 def default_in_memory_filer_server_parameters():

@@ -1,11 +1,7 @@
-import contextlib
-from contextlib import AbstractAsyncContextManager
-from typing import Callable, AsyncIterator
-
 from anyio import AsyncContextManagerMixin
 
-
-# Simplified version of StatsForStreamProcessing to only get simple time or space related information
+from typing import Callable, AsyncIterator
+import contextlib
 
 
 class StatePoller(AsyncContextManagerMixin):
