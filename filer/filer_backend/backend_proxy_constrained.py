@@ -2,24 +2,25 @@ from filer.base_exceptions import FilerSerialException, FilerConstraintType, Out
     AlreadyUploadingContent, NotExistingPlaceholder, NotExistingContent, ExpectedAgainstReality, PredicateType, \
     BadOffset
 from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType, BackendFailure
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackendWithContextManagement
+from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackendWithContextManagement, \
+    EffectfulFilerBackend
 from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
 from baseimplems.datastreams.constrained import StreamWatchguard, StreamConstraints
 from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
-from filer.filer_backend.content_integrity_cache import is_hash_valid_for_exn
+from filer.filer_backend.content_integrity_cache import EnsureContentIntegrity
 from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
+from filer.filer_backend.interval_union_bytes import BytesIntervalUnion
 from baseimplems.datastreams.stream_event import StreamEndReason
 from basetypes.implementation.dataformat.hashed import Hashed
-from filer.filer_backend.interval_union import IntervalUnion
 from filer.filer_backend.utils_exn import SerialException
 
+from anyio import create_task_group, Lock, CancelScope
 from pydantic import BaseModel
 
 from contextlib import asynccontextmanager
-from anyio import create_task_group, Lock, CancelScope
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 
 
 class ConstraintsParameters(BaseModel):
@@ -69,6 +70,7 @@ It also has the role of checking if compression would be useful and apply it
 class EffectfulConstrainedFilerBackend(
     EffectfulFilerBackendWithContextManagement[Hashed, BackendFailure],
     EffectfulBackend[Hashed, BackendFailure],
+    EnsureContentIntegrity[Hashed],
 ):
     def __init__(self, params: ConstrainedBackendParameters):
         self._params = params
@@ -89,6 +91,9 @@ class EffectfulConstrainedFilerBackend(
         self._upload_poller = {}
         self._upload_end_event = {}
         self._upload_status = {}
+        self._intervals_for_id: dict[tuple[Hashed, int], BytesIntervalUnion] = {}
+        self._uploaded_size_for: dict[tuple[Hashed, int], int] = {}
+        self._expected_total_size_for: dict[tuple[Hashed, int], int] = {}
 
         self._upload_stream_constraints = self._params.uploadConstraints
 
@@ -161,6 +166,10 @@ class EffectfulConstrainedFilerBackend(
         result = await self._internal.prepare_placeholder_for_hash_exn(locator, placeholder_index, total_size)
         if isinstance(result, RegistryFailure):
             raise result.originalException
+
+        self._intervals_for_id[(locator, placeholder_index)] = BytesIntervalUnion(total_size, store_data=False)
+        self._expected_total_size_for[(locator, placeholder_index)] = total_size
+        self._uploaded_size_for[(locator, placeholder_index)] = 0
         self._current_task_group.start_soon(self._safe_upload_monitoring, locator, placeholder_index, total_size)
 
 
@@ -256,67 +265,63 @@ class EffectfulConstrainedFilerBackend(
                 )
             )
 
-        size_written = await self._internal.upload_chunk_at(locator, placeholder_index, offset, data)
+        _ = await self._internal.upload_chunk_at(locator, placeholder_index, offset, data)
 
-        interval = self._intervals_for_id[placeholder_index]
-        data_slices = self._data_slices_per_id[placeholder_index]
-
-        interval_tuple = (offset, min(offset + size, self._expected_total_size_for[(locator, placeholder_index)]))
-        intersection: IntervalUnion = interval.intersect(*interval_tuple)
-        bytes_updated = 0
-        for start, end in intersection.intervals:
-            if (start, end) in data_slices:
-                del data_slices[(start, end)]
-                interval.delete(start, end)
-                bytes_updated += start - end
-
-        intersection_diff: IntervalUnion = interval.intersect_difference(*interval_tuple)
-        for start, end in intersection_diff.intervals:
-            data_slices[(start, end)] = True
-        interval.add(*interval_tuple)
-        self._uploaded_size_for[placeholder_index] += intersection_diff.actual_filled + bytes_updated
-        written = intersection_diff.actual_filled + bytes_updated
+        interval = self._intervals_for_id[(locator, placeholder_index)]
+        written = interval.union_from(offset, data)
+        self._uploaded_size_for[(locator, placeholder_index)] = written
 
         if interval.number_parts > self._params.maxIntervalParts:
             raise SerialException(
                 ExternalFailure(
                     externalFailureType=ExternalFailureType.TriggeredSecurity,
                     humanMessage=f"Too much parts encountered during upload: "
-                                 f"{self._temporaryfiles_per_placeholder_index[placeholder_index].number_parts} "
-                                 f"instead of max {self._params.maxIntervalParts} expected",
+                                 f"{interval.number_parts} instead of max {self._params.maxIntervalParts} expected",
                 )
             )
 
-        if self._temporaryfiles_per_placeholder_index[placeholder_index].is_complete:
+        if interval.is_complete:
             await self.upload_terminate_at_exn(locator, placeholder_index)
         return written
 
+    def _ensure_clean_termination_for_placeholder_called_exactly_once(self, locator: Hashed, placeholder_index: int):
+        if (locator, placeholder_index) in self._intervals_for_id:
+            self._current_bytes_expected -= self._expected_total_size_for[(locator, placeholder_index)]
+            self._stop_stream(locator, placeholder_index)
+            del self._upload_guard[(locator, placeholder_index)]
+            del self._upload_stream[(locator, placeholder_index)]
+            del self._upload_poller[(locator, placeholder_index)]
+            del self._upload_end_event[(locator, placeholder_index)]
+            del self._upload_status[(locator, placeholder_index)]
+            del self._intervals_for_id[(locator, placeholder_index)]
+            del self._uploaded_size_for[(locator, placeholder_index)]
+            del self._expected_total_size_for[(locator, placeholder_index)]
 
-    def _ensure_clean_termination_for_placeholder_called_exactly_once(self, placeholder_index):
-        if placeholder_index in self._temporaryfiles_per_placeholder_index:
-            del self._temporaryfiles_per_placeholder_index[placeholder_index]
-            self._current_bytes_expected -= self._expected_total_size_for[placeholder_index]
+    def _download_backend(self) -> EffectfulFilerBackend[Hashed, Any, BackendFailure]:  # for EnsureContentIntegrity
+        return self._internal
 
     async def upload_terminate_at_exn(self, locator: Hashed, placeholder_index: int):
-        increase_reserved_size = False
-        print("GOING TERMINATION")
-        if self._temporaryfiles_per_placeholder_index[placeholder_index].is_complete:
-            await is_hash_valid_for_exn(locator, self._temporaryfiles_per_placeholder_index[placeholder_index].complete_data_gen_exn)
-            # check_final_content_hash_exn(locator, self._temporaryfiles_per_placeholder_index[placeholder_index].complete_data_gen_exn)
-            increase_reserved_size = True
-
-        result = await self._internal.upload_terminate_at(locator, placeholder_index)
+        # TODO: we had to terminate upload (so one must really ensure the target internal is a cached fast backend
+        # because currently we have to use the download method of the backend to check the integrity
+        # otherwise one should ensure packe order so that there is no need to keep data in memory for computing the
+        # hash in parallel. One can also note this may not solve the compression problem, while in the current case it's
+        # not optimized but ok
+        result = await self._internal.upload_terminate_for_hash_exn(locator, placeholder_index)
         if isinstance(result, BackendFailure):
             print("GOT FAILUER", result)
             raise result.originalException
 
-        print("ICI", increase_reserved_size)
-        if increase_reserved_size:  # we wall it after upload_terminate_at, which, if in error, won't cause reserved size increment
-            self._current_bytes_uploaded_existing_content += self._expected_total_size_for[placeholder_index]
+        print("GOING TERMINATION")
+        if self._intervals_for_id[(locator, placeholder_index)].is_complete:
+            await self.is_hash_valid_for_exn(locator)
+
+            # we call it after upload_terminate_at, which, if in error, won't cause reserved size increment
+            self._current_bytes_uploaded_existing_content += self._expected_total_size_for[(locator, placeholder_index)]
+            self._total_transmitted_upload_success += self._expected_total_size_for[(locator, placeholder_index)]
 
         # in case upload_terminate_at fails, this cleanup won't be called yet. We may retry upload termination few times
         # then the cleanup task will call _ensure_clean_termination_for_placeholder_called_exactly_once anyway
-        self._ensure_clean_termination_for_placeholder_called_exactly_once(placeholder_index)
+        self._ensure_clean_termination_for_placeholder_called_exactly_once(locator, placeholder_index)
 
 
     async def download_chunk_from_exn(self, locator: Hashed, offset: int, size: int) -> bytes:
@@ -378,8 +383,10 @@ class EffectfulConstrainedFilerBackend(
 
         await self._internal.delete_resource_at_exn(locator, placeholder_index)
 
+        # same remark here: in case delete_resource_at_exn fails, this cleanup won't be called yet. We may retry deletion and
+        # termination few times then the cleanup task will call _ensure_clean_termination_for_placeholder_called_exactly_once anyway
         if placeholder_index >= 0:
-            self._ensure_clean_termination_for_placeholder_called_exactly_once(placeholder_index)
+            self._ensure_clean_termination_for_placeholder_called_exactly_once(locator, placeholder_index)
         else:
             sz = self.size_of_content_at_exn(locator)
             self._current_bytes_uploaded_existing_content -= sz

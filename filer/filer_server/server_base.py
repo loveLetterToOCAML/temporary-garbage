@@ -186,8 +186,8 @@ class EffectfulFilerServer(
     @asynccontextmanager
     async def ensure_coherent_at_start_and_stop(self):
         allowed_deletion = self._global_params.globalParameters.allowedDeletion
+        self.startup_metadata_report = IntegrityReport[HashType, ExternalResourceLocatorType]()
         if self._init_parameters:
-            self.startup_metadata_report = IntegrityReport[HashType, ExternalResourceLocatorType]()
             if self._init_parameters.cacheMetadataAtStartup:
                 self.startup_metadata_report = await self.craft_integrity_report(
                     delete_bad=allowed_deletion, check_integrity=self._init_parameters.onlyCheckIntegrityAtDownloadTime

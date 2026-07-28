@@ -3,7 +3,7 @@ from __future__ import annotations
 from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent, MultiplePydanticFilerException, \
     NotExistingPlaceholder
 from filer.filer_server.server_base import FilerServerParameters, BackendFailureType, PydanticHashableWithBytesRepr
-from filer.filer_backend.backend_protocol import EffectfulBackend
+from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
 from filer.filer_backend.backend_failure import BackendFailure
 
 from anyio import AsyncContextManagerMixin
@@ -21,7 +21,10 @@ class FilerServerChainParameters(BaseModel):
     slowerServerParameters: FilerServerParameters | FilerServerChainParameters  # always construct from slower to faster
 
 
-class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], AsyncContextManagerMixin):
+class EffectfulFilerServerChain(
+    EffectfulFilerBackendDefault[HashType, BackendFailure],
+    AsyncContextManagerMixin
+):
 
     def __init__(self, params: FilerServerChainParameters):
         self._faster_params = params.fasterServerParameters
@@ -36,6 +39,8 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
             return await self._slower.size_for_hash_exn(hash)
 
     async def download_chunk_from_exn(self, hash: HashType, offset: int, size: int) -> bytes:
+        if not self._faster_params.globalParameters.allowedRead:  # little shortcut there, avoid calling faster which will fail
+            return await self._slower.download_chunk_for_hash_exn(hash, offset, size)
         try:
             return await self._faster.download_chunk_for_hash_exn(hash, offset, size)
         except:
@@ -139,6 +144,9 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
         self._successful_placeholders.add((hash, placeholder_index))
 
     async def delete_resource_at_exn(self, hash: HashType, placeholder_index: int = -1):
+        if not self._faster_params.globalParameters.allowedDeletion:  # little shortcut there, avoid calling faster which will fail
+            return await self._slower.delete_content_exn(hash, placeholder_index)
+
         try:
             return await self._faster.delete_content_exn(hash, placeholder_index)
         except Exception as exn1:
@@ -179,7 +187,3 @@ class EffectfulFilerServerChain(EffectfulBackend[HashType, BackendFailure], Asyn
             self._faster
         ):
             yield self
-
-
-if __name__ == '__main__':
-    pass
