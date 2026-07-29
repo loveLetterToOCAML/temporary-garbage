@@ -16,11 +16,14 @@ from baseimplems.datastreams.stream_event import StreamEndReason
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.filer_backend.utils_exn import SerialException
 
-from anyio import create_task_group, Lock, CancelScope
+from anyio import create_task_group, Lock, CancelScope, AsyncContextManagerMixin
 from pydantic import BaseModel
 
+from typing import AsyncIterator, Any, TypeVar
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Any
+
+
+ExternalResourceLocatorType = TypeVar('ExternalResourceLocatorType')
 
 
 class ConstraintsParameters(BaseModel):
@@ -29,6 +32,7 @@ class ConstraintsParameters(BaseModel):
     maximumContentSize: int = 0x400000000  # 16 Gb max
     minimumContentSize: int = 0x40         # content less than 0x40 should not be uploaded in filer
     maximumSizeWrite: int = 0x1000000
+    minimumSizeRead: int = 0x1000
     maximumSizeRead: int = 0x1000000
     fixedChunkSize: int = -1               # negative = no fixed size chunk required
 
@@ -68,9 +72,10 @@ It also has the role of checking if compression would be useful and apply it
 """
 
 class EffectfulConstrainedFilerBackend(
-    EffectfulFilerBackendWithContextManagement[Hashed, BackendFailure],
+    EffectfulFilerBackend[Hashed, ExternalResourceLocatorType, BackendFailure],
     EffectfulBackend[Hashed, BackendFailure],
     EnsureContentIntegrity[Hashed],
+    AsyncContextManagerMixin
 ):
     def __init__(self, params: ConstrainedBackendParameters):
         self._params = params
@@ -110,10 +115,22 @@ class EffectfulConstrainedFilerBackend(
                 yield
 
 
-    async def size_of_content_at_exn(self, locator: Hashed) -> int:
-        return await self._internal.size_of_content_at_exn(locator)
+    @property
+    def _effectful_backend(self) -> EffectfulBackend[ExternalResourceLocatorType, BackendFailure]:
+        return self
 
-    async def prepare_placeholder_at_exn(self, locator: Hashed, placeholder_index: int, total_size: int):
+    def hash_from_resource_locator(self, locator: ExternalResourceLocatorType) -> Hashed | None:
+        return self._internal.hash_from_resource_locator(locator)
+
+    def resource_locator_from_hash(self, hash: Hashed) -> ExternalResourceLocatorType:
+        return self._internal.resource_locator_from_hash(hash)
+
+
+    async def size_of_content_at_exn(self, locator: ExternalResourceLocatorType) -> int:
+        return await self._internal._effectful_backend.size_of_content_at_exn(locator)
+
+    async def prepare_placeholder_at_exn(self, locator: ExternalResourceLocatorType, placeholder_index: int, total_size: int):
+        hash : Hashed = self.hash_from_resource_locator(locator)
         if not self._params.globalParameters.allowedWrite:
             raise FilerSerialException(
                 OutOfConstraints(
@@ -140,7 +157,7 @@ class EffectfulConstrainedFilerBackend(
         if placeholder_index < 0:
             raise FilerSerialException(
                 NotExistingPlaceholder(
-                    inputHash=locator,
+                    inputHash=hash.hash,
                     placeholderIndex=placeholder_index
                 )
             )
@@ -148,7 +165,7 @@ class EffectfulConstrainedFilerBackend(
         if placeholder_index >= 0 and placeholder_index <= self._current_max_placeholder_index:
             raise FilerSerialException(
                 AlreadyUploadingContent(
-                    hashUploading=locator.hash,
+                    hashUploading=hash.hash,
                     placeholderIndex=placeholder_index
                 )
             )
@@ -163,17 +180,17 @@ class EffectfulConstrainedFilerBackend(
         #        )
         #    )
 
-        result = await self._internal.prepare_placeholder_for_hash_exn(locator, placeholder_index, total_size)
+        result = await self._internal.prepare_placeholder_for_hash_exn(hash, placeholder_index, total_size)
         if isinstance(result, RegistryFailure):
             raise result.originalException
 
-        self._intervals_for_id[(locator, placeholder_index)] = BytesIntervalUnion(total_size, store_data=False)
-        self._expected_total_size_for[(locator, placeholder_index)] = total_size
-        self._uploaded_size_for[(locator, placeholder_index)] = 0
-        self._current_task_group.start_soon(self._safe_upload_monitoring, locator, placeholder_index, total_size)
+        self._intervals_for_id[(hash, placeholder_index)] = BytesIntervalUnion(total_size, store_data=False)
+        self._expected_total_size_for[(hash, placeholder_index)] = total_size
+        self._uploaded_size_for[(hash, placeholder_index)] = 0
+        self._current_task_group.start_soon(self._safe_upload_monitoring, hash, placeholder_index, total_size)
 
 
-    async def _safe_upload_monitoring(self, locator: Hashed, placeholder_index:int, total_size: int):
+    async def _safe_upload_monitoring(self, hash: Hashed, placeholder_index:int, total_size: int):
         # we are not supposed to know the sizes in backend: only the filer server should have the big picture
         # so we just do stats here
         async with self._lock:
@@ -184,10 +201,10 @@ class EffectfulConstrainedFilerBackend(
 
         result = None
         try:
-            result = await self._start_upload_monitoring(locator, placeholder_index)
+            result = await self._start_upload_monitoring(hash, placeholder_index)
         finally:
             with CancelScope(shield=True):
-                await self.upload_terminate_for_hash_exn(locator, placeholder_index)
+                await self.upload_terminate_for_hash_exn(hash, placeholder_index)
             #async with self._lock:
             #    if result:
             #        self._total_transmitted_upload_success += total_size
@@ -195,36 +212,37 @@ class EffectfulConstrainedFilerBackend(
             #    self._current_bytes_expected -= total_size
 
 
-    async def _start_upload_monitoring(self, locator: Hashed, placeholder_index: int) -> bool:
+    async def _start_upload_monitoring(self, hash: Hashed, placeholder_index: int) -> bool:
         guard = StreamWatchguard(self._upload_stream_constraints, 'constrained-upload')
-        self._upload_guard[(locator, placeholder_index)] = guard
+        self._upload_guard[(hash, placeholder_index)] = guard
         async with (
             guard as (remote_send_stream, external_stream_poller, external_stream_end),
             remote_send_stream,
         ):
-            self._upload_stream[(locator, placeholder_index)] = remote_send_stream
-            self._upload_poller[(locator, placeholder_index)] = external_stream_poller
-            self._upload_end_event[(locator, placeholder_index)] = external_stream_end
+            self._upload_stream[(hash, placeholder_index)] = remote_send_stream
+            self._upload_poller[(hash, placeholder_index)] = external_stream_poller
+            self._upload_end_event[(hash, placeholder_index)] = external_stream_end
             await external_stream_end.wait()  # this will be automatically set when guard task group will close
-        status = self._upload_status[(locator, placeholder_index)] = guard.current_internal_state()
+        status = self._upload_status[(hash, placeholder_index)] = guard.current_internal_state()
         print(status)
         return status.status.reason == StreamEndReason.END_OF_INPUT
 
-    def _stop_stream(self, locator: Hashed, placeholder_index: int):
-        if self._upload_end_event.get((locator, placeholder_index)):
-            self._upload_end_event[(locator, placeholder_index)].set()
+    def _stop_stream(self, hash: Hashed, placeholder_index: int):
+        if self._upload_end_event.get((hash, placeholder_index)):
+            self._upload_end_event[(hash, placeholder_index)].set()
 
-    def _stream_state(self, locator: Hashed, placeholder_index: int):
-        if self._upload_poller.get((locator, placeholder_index)):
-            return self._upload_poller[(locator, placeholder_index)].snapshot()
+    def _stream_state(self, hash: Hashed, placeholder_index: int):
+        if self._upload_poller.get((hash, placeholder_index)):
+            return self._upload_poller[(hash, placeholder_index)].snapshot()
 
-    def _stream_status(self, locator: Hashed, placeholder_index: int):
-        if self._upload_status.get((locator, placeholder_index)):
-            return self._upload_status[(locator, placeholder_index)]
-        elif self._upload_poller.get((locator, placeholder_index)):
-            return self._upload_poller[(locator, placeholder_index)].snapshot().status
+    def _stream_status(self, hash: Hashed, placeholder_index: int):
+        if self._upload_status.get((hash, placeholder_index)):
+            return self._upload_status[(hash, placeholder_index)]
+        elif self._upload_poller.get((hash, placeholder_index)):
+            return self._upload_poller[(hash, placeholder_index)].snapshot().status
 
-    async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
+    async def upload_chunk_at_exn(self, locator: ExternalResourceLocatorType, placeholder_index: int, offset: int, data: bytes) -> int:
+        hash: Hashed = self.hash_from_resource_locator(locator)
         if not self._params.globalParameters.allowedWrite:
             raise FilerSerialException(
                 OutOfConstraints(
@@ -248,28 +266,28 @@ class EffectfulConstrainedFilerBackend(
             )
 
         if placeholder_index < 0 or placeholder_index >= self._current_max_placeholder_index or \
-                (locator, placeholder_index) not in self._expected_total_size_for:
+                (hash, placeholder_index) not in self._expected_total_size_for:
             raise FilerSerialException(
                 NotExistingPlaceholder(
-                    inputHash=locator.hash,
+                    inputHash=hash.hash,
                     placeholderIndex=placeholder_index
                 )
             )
 
         if self._constraints.fixedChunkSize and size != self._constraints.fixedChunkSize and \
                 ((offset % self._constraints.fixedChunkSize) != 0 or
-                 self._expected_total_size_for[(locator, placeholder_index)] - offset >= self._constraints.fixedChunkSize):
+                 self._expected_total_size_for[(hash, placeholder_index)] - offset >= self._constraints.fixedChunkSize):
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.FIXED_CHUNK_SIZE_EXPECTED
                 )
             )
 
-        _ = await self._internal.upload_chunk_at(locator, placeholder_index, offset, data)
+        _ = await self._internal.upload_chunk_for_hash_exn(hash, placeholder_index, offset, data)
 
-        interval = self._intervals_for_id[(locator, placeholder_index)]
+        interval = self._intervals_for_id[(hash, placeholder_index)]
         written = interval.union_from(offset, data)
-        self._uploaded_size_for[(locator, placeholder_index)] = written
+        self._uploaded_size_for[(hash, placeholder_index)] = written
 
         if interval.number_parts > self._params.maxIntervalParts:
             raise SerialException(
@@ -284,48 +302,49 @@ class EffectfulConstrainedFilerBackend(
             await self.upload_terminate_at_exn(locator, placeholder_index)
         return written
 
-    def _ensure_clean_termination_for_placeholder_called_exactly_once(self, locator: Hashed, placeholder_index: int):
-        if (locator, placeholder_index) in self._intervals_for_id:
-            self._current_bytes_expected -= self._expected_total_size_for[(locator, placeholder_index)]
-            self._stop_stream(locator, placeholder_index)
-            del self._upload_guard[(locator, placeholder_index)]
-            del self._upload_stream[(locator, placeholder_index)]
-            del self._upload_poller[(locator, placeholder_index)]
-            del self._upload_end_event[(locator, placeholder_index)]
-            del self._upload_status[(locator, placeholder_index)]
-            del self._intervals_for_id[(locator, placeholder_index)]
-            del self._uploaded_size_for[(locator, placeholder_index)]
-            del self._expected_total_size_for[(locator, placeholder_index)]
+    def _ensure_clean_termination_for_placeholder_called_exactly_once(self, hash: Hashed, placeholder_index: int):
+        if (hash, placeholder_index) in self._intervals_for_id:
+            self._current_bytes_expected -= self._expected_total_size_for[(hash, placeholder_index)]
+            self._stop_stream(hash, placeholder_index)
+            del self._upload_guard[(hash, placeholder_index)]
+            del self._upload_stream[(hash, placeholder_index)]
+            del self._upload_poller[(hash, placeholder_index)]
+            del self._upload_end_event[(hash, placeholder_index)]
+            del self._upload_status[(hash, placeholder_index)]
+            del self._intervals_for_id[(hash, placeholder_index)]
+            del self._uploaded_size_for[(hash, placeholder_index)]
+            del self._expected_total_size_for[(hash, placeholder_index)]
 
-    def _download_backend(self) -> EffectfulFilerBackend[Hashed, Any, BackendFailure]:  # for EnsureContentIntegrity
+    def _download_backend(self) -> EffectfulFilerBackend[Hashed, ExternalResourceLocatorType, BackendFailure]:  # for EnsureContentIntegrity
         return self._internal
 
-    async def upload_terminate_at_exn(self, locator: Hashed, placeholder_index: int):
+    async def upload_terminate_at_exn(self, locator: ExternalResourceLocatorType, placeholder_index: int):
+        hash: Hashed = self.hash_from_resource_locator(locator)
         # TODO: we had to terminate upload (so one must really ensure the target internal is a cached fast backend
         # because currently we have to use the download method of the backend to check the integrity
         # otherwise one should ensure packe order so that there is no need to keep data in memory for computing the
         # hash in parallel. One can also note this may not solve the compression problem, while in the current case it's
         # not optimized but ok
-        result = await self._internal.upload_terminate_for_hash_exn(locator, placeholder_index)
+        result = await self._internal.upload_terminate_for_hash_exn(hash, placeholder_index)
         if isinstance(result, BackendFailure):
             print("GOT FAILUER", result)
             raise result.originalException
 
         print("GOING TERMINATION")
-        if self._intervals_for_id[(locator, placeholder_index)].is_complete:
-            await self.is_hash_valid_for_exn(locator)
+        if self._intervals_for_id[(hash, placeholder_index)].is_complete:
+            await self.is_hash_valid_for_exn(hash)
 
             # we call it after upload_terminate_at, which, if in error, won't cause reserved size increment
-            self._current_bytes_uploaded_existing_content += self._expected_total_size_for[(locator, placeholder_index)]
-            self._total_transmitted_upload_success += self._expected_total_size_for[(locator, placeholder_index)]
+            self._current_bytes_uploaded_existing_content += self._expected_total_size_for[(hash, placeholder_index)]
+            self._total_transmitted_upload_success += self._expected_total_size_for[(hash, placeholder_index)]
 
         # in case upload_terminate_at fails, this cleanup won't be called yet. We may retry upload termination few times
         # then the cleanup task will call _ensure_clean_termination_for_placeholder_called_exactly_once anyway
-        self._ensure_clean_termination_for_placeholder_called_exactly_once(locator, placeholder_index)
+        self._ensure_clean_termination_for_placeholder_called_exactly_once(hash, placeholder_index)
 
 
-    async def download_chunk_from_exn(self, locator: Hashed, offset: int, size: int) -> bytes:
-        if not self._constraints.globalParameters.allowedRead:
+    async def download_chunk_from_exn(self, locator: ExternalResourceLocatorType, offset: int, size: int) -> bytes:
+        if not self._params.globalParameters.allowedRead:
             raise FilerSerialException(
                 OutOfConstraints(
                     failedConstraint=FilerConstraintType.NO_DOWNLOAD
@@ -339,33 +358,35 @@ class EffectfulConstrainedFilerBackend(
                 )
             )
 
-        if size < self._constraints.minimumSizeRead:
-            raise FilerSerialException(
-                OutOfConstraints(
-                    failedConstraint=FilerConstraintType.MIN_CHUNK_SIZE
-                )
-            )
-
-        sz = await self._internal.size_for_hash(locator)
+        hash: Hashed = self.hash_from_resource_locator(locator)
+        sz = await self.size_of_content_at_exn(locator)
         if isinstance(sz, BackendFailure) or sz is None:
             raise FilerSerialException(
                 NotExistingContent(
-                    inputHash=locator.hash,
+                    inputHash=hash.hash,
                 )
             )
 
         if offset >= sz:
             raise FilerSerialException(
                 BadOffset(
-                    inputHash=locator.hash,
+                    inputHash=hash.hash,
                     askedOffset=offset,
                     dataSize=sz
                 )
             )
 
-        return await self._internal.download_chunk_for_hash_exn(locator, offset, size)
+        if size < self._constraints.minimumSizeRead and sz - offset >= self._constraints.minimumSizeRead:
+            raise FilerSerialException(
+                OutOfConstraints(
+                    failedConstraint=FilerConstraintType.MIN_CHUNK_SIZE
+                )
+            )
 
-    async def delete_resource_at_exn(self, locator: Hashed, placeholder_index: int = -1):
+        return await self._internal.download_chunk_for_hash_exn(hash, offset, size)
+
+    async def delete_resource_at_exn(self, locator: ExternalResourceLocatorType, placeholder_index: int = -1):
+        hash: Hashed = self.hash_from_resource_locator(locator)
         if not self._params.globalParameters.allowedDelete:
             raise FilerSerialException(
                 OutOfConstraints(
@@ -373,25 +394,25 @@ class EffectfulConstrainedFilerBackend(
                 )
             )
 
-        if placeholder_index >= self._current_placeholder_index:
+        if placeholder_index >= self._current_max_placeholder_index:
             raise FilerSerialException(
                 NotExistingPlaceholder(
-                    inputHash=locator.hash,
+                    inputHash=hash.hash,
                     placeholderIndex=placeholder_index
                 )
             )
 
-        await self._internal.delete_resource_at_exn(locator, placeholder_index)
+        await self._internal.delete_content_exn(hash, placeholder_index)
 
         # same remark here: in case delete_resource_at_exn fails, this cleanup won't be called yet. We may retry deletion and
         # termination few times then the cleanup task will call _ensure_clean_termination_for_placeholder_called_exactly_once anyway
         if placeholder_index >= 0:
-            self._ensure_clean_termination_for_placeholder_called_exactly_once(locator, placeholder_index)
+            self._ensure_clean_termination_for_placeholder_called_exactly_once(hash, placeholder_index)
         else:
             sz = self.size_of_content_at_exn(locator)
             self._current_bytes_uploaded_existing_content -= sz
 
-    async def _list_resources_reorganize_exn(self) -> AsyncIterator[Hashed]:
+    async def _list_resources_reorganize_exn(self) -> AsyncIterator[ExternalResourceLocatorType]:
         async for hash in self._internal.list_resources_reorganize_exn():
             yield hash
 

@@ -66,11 +66,11 @@ if __name__ == '__main__':
             )
             f2 = FilerServerFor(fscp2)
 
-            async with f1 as report1:
-                print(report1)
-                print("====")
-                await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000)
-                print("====")
+            #async with f1 as report1:
+            #    print(report1)
+            #    print("====")
+            #    await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000)
+            #    print("====")
             print("GO 2")
 
             async with f2 as report2:

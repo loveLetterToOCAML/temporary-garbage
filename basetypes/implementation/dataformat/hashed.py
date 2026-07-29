@@ -5,6 +5,8 @@ from hashlib import sha256, sha512, md5
 from contextlib import contextmanager
 from enum import Enum
 
+from filer.filer_server.integrity_report import PydanticHashableWithBytesRepr
+
 
 class HashAlgorithm(Enum):
     SHA256 = 1
@@ -45,7 +47,7 @@ class HashProtocol(Protocol):
         ...
 
 
-class Hashed(BaseModel):  # due to BaseModel metaclass we cannot make the Hashed inherits from HashContextProtocol
+class Hashed(PydanticHashableWithBytesRepr):  # due to BaseModel metaclass we cannot make the Hashed inherits from HashContextProtocol
     hashAlgorithm: HashAlgorithmInstance
     hash: bytes
 
@@ -54,6 +56,9 @@ class Hashed(BaseModel):  # due to BaseModel metaclass we cannot make the Hashed
 
     def __eq__(self, other):
         return self.hash == other.hash and self.hashAlgorithm == other.hashAlgorithm
+
+    def __bytes__(self) -> bytes:
+        return self.hash
 
     @final
     @contextmanager

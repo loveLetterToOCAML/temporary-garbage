@@ -123,7 +123,7 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
             size = await self.size_for_hash_exn(hash)
             for offset in range(0, size, chunk_size):
                 h.update(await self.download_chunk_for_hash_exn(hash, offset, chunk_size))
-            return h.is_same()
+            return h.is_same(hash.hash)
 
     @final
     def exception_to_backend_failure(self, exn: Exception) -> BackendFailureType:

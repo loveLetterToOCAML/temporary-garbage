@@ -1,7 +1,7 @@
 from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholder, \
     NotExistingContent
 from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance, \
-    check_valid_hash_for_type, MixedMd5Sha256
+    check_valid_hash_for_type, MixedMd5Sha256, hash_protocol_for_type
 from filer.filer_backend.effectful_fs import FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
     FsReadContent, FsDelete, FsList, ExceptionSideEffect
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
@@ -147,18 +147,23 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
         return new_path
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:
+        to_rename = []
         for entry in os.scandir(self._params.basePath):
             if os.path.isfile(entry.path):
                 path = Path(entry.path)
                 h = EffectfulFilerFsBackend.hash_from_resource_locator(path)
                 if h:
                     yield path
+                    continue
                 if self._params.expectsOnlyRightFormatted:
                     continue
-                elif self._params.allowRenamingOfBadlyFormatted and (checked_path_or_renamed := await self._check_and_reformat(path)):
-                    yield checked_path_or_renamed
+                elif self._params.allowRenamingOfBadlyFormatted:
+                    to_rename.append(path)
                 elif not self._params.allowRenamingOfBadlyFormatted:
                     yield path
+        for path in to_rename:
+            if checked_path_or_renamed := await self._check_and_reformat(path):
+                yield checked_path_or_renamed
         self._fs_lgr.info(f"Listed resource at {self._params.basePath}", fs_side_effect_for(FsList(), self._params.basePath))
 
     def _exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
@@ -212,7 +217,6 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
 
 if __name__ == '__main__':
-    from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
 
     import anyio

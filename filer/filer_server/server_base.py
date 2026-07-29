@@ -5,8 +5,8 @@ from filer.filer_backend.backend_proxy_constrained import GenericBackendParamete
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
 from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
 from filer.filer_server.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
+from filer.filer_backend.backend_factory import FilerBackendFor, KnownFilerBackendParameters
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
-from filer.filer_backend.backend_factory import FilerBackendFor
 from basetypes.implementation.dataformat.hashed import Hashed
 
 from anyio import AsyncContextManagerMixin
@@ -35,7 +35,7 @@ class FilerServerInitParameters(BaseModel):
 class FilerServerParameters(BaseModel):
     globalParameters: GenericBackendParameters  # filer server is still a backend, and can be configured to restrict what can be done on it independently of linked backends
     initParameters: FilerServerInitParameters | None  # if none, one can consider the backend is not persistent and no metadata import is performed
-    backendParameters: ConstrainedBackendParameters
+    backendParameters: KnownFilerBackendParameters
     registryParameters: KnownFilerRegistryParameters
 
 """
@@ -154,29 +154,36 @@ class EffectfulFilerServer(
         # return self._backend.exception_to_registry_failure(exn)
 
     async def craft_integrity_report(self, delete_bad: bool = False, check_integrity: bool = False):
+        print("CRAFTING INTEGRITY RTPOR")
         unexpected_items = {}
         content_not_matching_content = {}
         good_contents = []
         unknown_contents = []
         async for locator in self._list_resources_reorganize_exn():
-            hash = self.hash_from_resource_locator(locator)
+            print("LOCATOR HERE", locator)
+            hash = self._backend.hash_from_resource_locator(locator)
             if not hash:
                 unexpected_items[locator] = True
                 if delete_bad:
-                    await self.delete_raw_resource_exn(locator)
+                    await self._backend.delete_raw_resource_exn(locator)
                 continue
 
             if check_integrity:
-                if await self.check_integrity_for_exn(hash):
+                if await self._backend.check_integrity_for_exn(hash):
                     good_contents.append(hash)
                 elif delete_bad:
-                    await self.delete_raw_resource_exn(locator)
+                    print("delete bad")
+                    await self._backend.delete_raw_resource_exn(locator)
                     content_not_matching_content[hash] = True
                 else:
                     content_not_matching_content[hash] = False
             else:
                 unknown_contents.append(hash)
-        return IntegrityReport[HashType, ExternalResourceLocatorType](
+        print(good_contents)
+        print(unknown_contents)
+        print(unexpected_items)
+        print(content_not_matching_content)
+        return IntegrityReport(
             unexpectedItems=unexpected_items,
             contentNotMatchingHashes=content_not_matching_content,
             contentMatchingHashes=good_contents,
