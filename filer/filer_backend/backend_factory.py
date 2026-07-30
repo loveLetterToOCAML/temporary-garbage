@@ -1,20 +1,21 @@
 from filer.filer_backend.backend_proxy_constrained import ConstrainedBackendParameters, EffectfulConstrainedFilerBackend
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters, EffectfulFilerInMemBackend
 from filer.filer_backend.backend_impl_sql import EffectfulFilerSqlBackend, DbBackendInContextParameters
-from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFilerFsBackend
+from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend, FilerBackendOptimizedFsParameters
 from basetypes.implementation.dataformat.hashed import Hashed, MixedMd5Sha256
 from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
 
 
-KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | DbBackendInContextParameters | \
-                              RemoteBackendInContextParameters | ConstrainedBackendParameters
+KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | FilerBackendOptimizedFsParameters | \
+                              DbBackendInContextParameters | RemoteBackendInContextParameters | ConstrainedBackendParameters
 
 
 def FilerBackendFor(backend_params: KnownFilerBackendParameters):
     match backend_params:
         case FilerBackendInMemParameters():
             return EffectfulFilerInMemBackend(backend_params)
-        case FilerBackendFsParameters():
+        case FilerBackendFsParameters() | FilerBackendOptimizedFsParameters():
             return EffectfulFilerFsBackend(backend_params)
         case DbBackendInContextParameters():
             return EffectfulFilerSqlBackend()

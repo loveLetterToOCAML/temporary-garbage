@@ -1,11 +1,11 @@
 from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholder, \
     NotExistingContent
-from basetypes.implementation.dataformat.hashed import Hashed, HashAlgorithm, HashAlgorithmInstance, \
-    check_valid_hash_for_type, MixedMd5Sha256, hash_protocol_for_type
+from basetypes.implementation.dataformat.hashed import HashAlgorithmInstance, \
+    MixedMd5Sha256, hash_protocol_for_type
 from filer.filer_backend.effectful_fs import FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
     FsReadContent, FsDelete, FsList, ExceptionSideEffect
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
-from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
+from filer.filer_backend.backend_protocol import EffectfulBackend
 from filer.filer_backend.utils_exn import SerialException
 from policy.log import run_with_log_policy, LogLevel
 from log.logging_context import logger_for
@@ -13,7 +13,7 @@ from log.logging_context import logger_for
 from pydantic import BaseModel
 from anyio import open_file
 
-from typing import AsyncIterator, Type
+from typing import AsyncIterator
 from functools import wraps
 from pathlib import Path
 import os
@@ -37,43 +37,9 @@ class FilerBackendFsParameters(BaseModel):
     defaultHashAlgorithm: HashAlgorithmInstance = MixedMd5Sha256()
 
 
-class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure]):
-
-    def __init__(self, params: FilerBackendFsParameters, ChosenImplem: Type | None = None):
-        self._params = params
-        self._implem = (ChosenImplem or EffectfulFsBackendSimple)(self._params)
-
-    @classmethod
-    @none_if_exception
-    def hash_from_resource_locator(self, locator: Path) -> Hashed | None:
-        fname = locator.name.split('.')[0]
-        alg, hash_hex = fname.split('-')
-        hash_algorithm_type = HashAlgorithm(int(alg))
-        hash_algorithm = HashAlgorithmInstance(type=hash_algorithm_type)
-        hash_raw = bytes.fromhex(hash_hex)
-        if not check_valid_hash_for_type(hash_algorithm, hash_raw):
-            return
-        return Hashed(
-            hashAlgorithm=hash_algorithm,
-            hash=hash_raw
-        )
-
-    @property
-    def _effectful_backend(self) -> EffectfulBackend[Path, BackendFailure]:
-        return self._implem
-
-    @staticmethod
-    def static_resource_locator_from_hash(base_path: Path | str, hash: Hashed) -> Path:
-        return Path(base_path) / f"{hash.hashAlgorithm.type.value}-{hash.hash.hex()}"
-
-    def resource_locator_from_hash(self, hash: Hashed) -> Path:
-        return self.static_resource_locator_from_hash(self._params.basePath, hash)
-
-
 class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
     def __init__(self, params: FilerBackendFsParameters):
-        self._current_placeholder_index = 0
         self._params = params
         self._fs_lgr = logger_for(__name__)  # TODO: shouldn't it be resolved during context management entering?
 
@@ -133,6 +99,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
             self._fs_lgr.info(f"Deleting placeholder resource at {path}", fs_side_effect_for(FsDelete(), path))
 
     async def _check_and_reformat(self, path: Path):
+        from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend
         h_instance = hash_protocol_for_type(self._params.defaultHashAlgorithm).fresh_hash_state()
         async with await open_file(path, 'rb') as f:
             chunk = await f.read1(0x1000000)
@@ -147,6 +114,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
         return new_path
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Path]:
+        from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend
         to_rename = []
         for entry in os.scandir(self._params.basePath):
             if os.path.isfile(entry.path):
@@ -167,6 +135,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
         self._fs_lgr.info(f"Listed resource at {self._params.basePath}", fs_side_effect_for(FsList(), self._params.basePath))
 
     def _exception_to_serialized_failure(self, exn: Exception) -> BackendFailure:
+        from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend
         if isinstance(exn, SerialException):
             return BackendFailure(
                 failure=exn.serialized,
@@ -218,6 +187,7 @@ class EffectfulFsBackendSimple(EffectfulBackend[Path, BackendFailure]):
 
 if __name__ == '__main__':
     from filer.filer_backend.utils_temp import enclose_within_temporary_dir_interactive_mock
+    from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend
 
     import anyio
 

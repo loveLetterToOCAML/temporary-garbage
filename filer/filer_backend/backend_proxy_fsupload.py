@@ -1,5 +1,6 @@
 from filer.filer_backend.content_integrity_cache import EnsureContentIntegrity, download_stream_for
-from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFilerFsBackend
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
+from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend
 from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.backend_proxy_constrained import KnownFilerBackendParameters
 from filer.filer_backend.backend_factory import FilerBackendFor
