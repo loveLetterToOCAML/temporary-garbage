@@ -14,19 +14,8 @@ from pydantic import BaseModel
 from anyio import open_file
 
 from typing import AsyncIterator
-from functools import wraps
 from pathlib import Path
 import os
-
-
-def none_if_exception(f):
-    @wraps(f)
-    def sub(*args, **kwargs):
-        try:
-            return f(*args, **kwargs)
-        except:
-            return
-    return sub
 
 
 class FilerBackendFsParameters(BaseModel):

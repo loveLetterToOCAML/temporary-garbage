@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 from filer.base_exceptions import FilerSerialException, AlreadyUploadingContent, NotExistingPlaceholder, \
-    NotExistingContent
-from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type, Hashed, HashAlgorithm, \
-    HashAlgorithmInstance, check_valid_hash_for_type
+    NotExistingContent, AlreadyUploadedContent
 from filer.filer_backend.effectful_fs import FsCreateReserve, fs_side_effect_for, FsUpdateContent, FsMove, \
     FsReadContent, FsDelete, FsList, ExceptionSideEffect
+from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type, Hashed
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
-from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, none_if_exception, EffectfulFsBackendSimple
+from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters, EffectfulFsBackendSimple
 from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFilerBackend
 from filer.filer_backend.utils_exn import SerialException
 from policy.log import run_with_log_policy, LogLevel
@@ -16,7 +17,8 @@ from anyio import open_file, AsyncContextManagerMixin, create_task_group, move_o
 
 from contextlib import asynccontextmanager
 from sortedcontainers import SortedDict
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterable
+from functools import wraps
 from pathlib import Path
 from os import PathLike
 import os
@@ -125,6 +127,12 @@ class EffectfulFsBackendOptimized(EffectfulBackend[Path, BackendFailure], AsyncC
         return await f.tell()
 
     async def prepare_placeholder_at_exn(self, locator: Path, placeholder_index: int, total_size: int):
+        if os.path.isfile(locator):
+            raise FilerSerialException(
+                AlreadyUploadedContent(
+                    hashAttempted=bytes.fromhex(locator.name)
+                )
+            )
         placeholder_path = self._placeholder_path_for(locator, placeholder_index)
         if os.path.isfile(placeholder_path):
             raise FilerSerialException(
@@ -254,7 +262,7 @@ class EffectfulFsBackendOptimized(EffectfulBackend[Path, BackendFailure], AsyncC
         return processed
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self):
+    async def __asynccontextmanager__(self) -> Iterable[EffectfulFsBackendOptimized]:
         self._cache = HandleCache(self._params.delayHoldingHandle, self._params.maximumSimultaneousHandle)
         async with self._cache:
             try:
@@ -262,6 +270,15 @@ class EffectfulFsBackendOptimized(EffectfulBackend[Path, BackendFailure], AsyncC
             finally:
                 self._cache.terminate_cache()
 
+
+def none_if_exception(f):
+    @wraps(f)
+    def sub(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except:
+            return
+    return sub
 
 
 class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure], AsyncContextManagerMixin):
@@ -274,17 +291,7 @@ class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure
     @classmethod
     @none_if_exception
     def hash_from_resource_locator(self, locator: Path) -> Hashed | None:
-        fname = locator.name.split('.')[0]
-        alg, hash_hex = fname.split('-')
-        hash_algorithm_type = HashAlgorithm(int(alg))
-        hash_algorithm = HashAlgorithmInstance(type=hash_algorithm_type)
-        hash_raw = bytes.fromhex(hash_hex)
-        if not check_valid_hash_for_type(hash_algorithm, hash_raw):
-            return
-        return Hashed(
-            hashAlgorithm=hash_algorithm,
-            hash=hash_raw
-        )
+        return Hashed.str_deserialize_exn(locator.name)
 
     @property
     def _effectful_backend(self) -> EffectfulBackend[Path, BackendFailure]:
@@ -292,13 +299,13 @@ class EffectfulFilerFsBackend(EffectfulFilerBackend[Hashed, Path, BackendFailure
 
     @staticmethod
     def static_resource_locator_from_hash(base_path: Path | str, hash: Hashed) -> Path:
-        return Path(base_path) / f"{hash.hashAlgorithm.type.value}-{hash.hash.hex()}"
+        return Path(base_path) / Hashed.str_serialize(hash)
 
     def resource_locator_from_hash(self, hash: Hashed) -> Path:
         return self.static_resource_locator_from_hash(self._params.basePath, hash)
 
     @asynccontextmanager
-    async def __asynccontextmanager__(self):
+    async def __asynccontextmanager__(self) -> Iterable[EffectfulFsBackendOptimized | EffectfulFsBackendSimple]:
         if self._must_enter_context:
             async with self._implem:
                 yield self

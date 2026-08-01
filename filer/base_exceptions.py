@@ -21,9 +21,10 @@ class FilerExceptionType(Enum):
     AlreadyUploadedChunk = 9
     BadChunkUploaded = 10
     BadOffset = 11
-    PermanentContent = 12
-    BadDeletionKey = 13
-    DeletionKeyRequired = 14
+    MissingChunks = 12
+    PermanentContent = 13
+    BadDeletionKey = 14
+    DeletionKeyRequired = 15
 
 
 class PydanticFilerException(PydanticException):
@@ -73,6 +74,7 @@ class FilerConstraintType(Enum):
     MIN_CHUNK_SIZE = 12
     MAX_CHUNK_SIZE = 13
     FIXED_CHUNK_SIZE_EXPECTED = 14
+    ALIGNED_CHUNK_EXPECTED = 15
 
     MAX_ELAPSED_DELAY_FOR_UPLOAD = 20
     MAX_ELAPSED_DELAY_FOR_NEXT_CHUNK = 21
@@ -112,6 +114,10 @@ class BadChunkUploaded(WithInputUlidAndHash):
 class BadOffset(WithInputUlidAndHash):
     askedOffset: int
     dataSize: int
+
+class MissingChunks(WithInputUlidAndHash):
+    expectedChunks: int
+    gotChunks: int
 
 class PermanentContent(WithInputUlidAndHash):
     pass

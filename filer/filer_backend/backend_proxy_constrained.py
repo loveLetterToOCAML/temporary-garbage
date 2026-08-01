@@ -6,6 +6,7 @@ from filer.filer_backend.backend_protocol import EffectfulBackend, EffectfulFile
     EffectfulFilerBackend
 from basetypes.implementation.dataformat.compression import CompressionAlgorithmInstance
 from baseimplems.datastreams.constrained import StreamWatchguard, StreamConstraints
+from filer.filer_backend.fixed_chunk_constraint import ensure_compatible_chunk_exn
 from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
 from filer.filer_backend.content_integrity_cache import EnsureContentIntegrity
@@ -61,8 +62,6 @@ class ConstrainedBackendParameters(BaseModel):
     uploadConstraints: StreamConstraints
     downloadConstraints: StreamConstraints
 
-
-# TODO: check_final_content_hash_exn
 
 """
 EffectfulConstrainedFilerBackend is the most complete piece of policies applied at generic backend level
@@ -274,14 +273,8 @@ class EffectfulConstrainedFilerBackend(
                 )
             )
 
-        if self._constraints.fixedChunkSize and size != self._constraints.fixedChunkSize and \
-                ((offset % self._constraints.fixedChunkSize) != 0 or
-                 self._expected_total_size_for[(hash, placeholder_index)] - offset >= self._constraints.fixedChunkSize):
-            raise FilerSerialException(
-                OutOfConstraints(
-                    failedConstraint=FilerConstraintType.FIXED_CHUNK_SIZE_EXPECTED
-                )
-            )
+        if self._constraints.fixedChunkSize > 0:
+            ensure_compatible_chunk_exn(offset, size, self._constraints.fixedChunkSize, self._expected_total_size_for[(hash, placeholder_index)])
 
         _ = await self._internal.upload_chunk_for_hash_exn(hash, placeholder_index, offset, data)
 

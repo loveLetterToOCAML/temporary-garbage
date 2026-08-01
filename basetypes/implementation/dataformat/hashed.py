@@ -1,11 +1,13 @@
+from __future__ import annotations
+
+from filer.filer_server.integrity_report import PydanticHashableWithBytesRepr
+
 from pydantic import BaseModel
 
 from typing import Protocol, final, Iterator, Type, Callable, Any, Literal
 from hashlib import sha256, sha512, md5
 from contextlib import contextmanager
 from enum import Enum
-
-from filer.filer_server.integrity_report import PydanticHashableWithBytesRepr
 
 
 class HashAlgorithm(Enum):
@@ -59,6 +61,22 @@ class Hashed(PydanticHashableWithBytesRepr):  # due to BaseModel metaclass we ca
 
     def __bytes__(self) -> bytes:
         return self.hash
+
+    def str_serialize(self) -> str:
+        return f"{self.hashAlgorithm.type.value}-{self.hash.hex()}"
+
+    @staticmethod
+    def str_deserialize_exn(hash_str: str) -> Hashed | None:
+        alg, hash_hex = hash_str.split('-')
+        hash_algorithm_type = HashAlgorithm(int(alg))
+        hash_algorithm = HashAlgorithmInstance(type=hash_algorithm_type)
+        hash_raw = bytes.fromhex(hash_hex)
+        if not check_valid_hash_for_type(hash_algorithm, hash_raw):
+            return
+        return Hashed(
+            hashAlgorithm=hash_algorithm,
+            hash=hash_raw
+        )
 
     @final
     @contextmanager
