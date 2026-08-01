@@ -104,7 +104,7 @@ class EffectfulFilerS3Backend(
         return resp['ContentLength']
 
     async def prepare_placeholder_at_exn(self, locator: S3ResourceLocator, placeholder_index: int, total_size: int):
-        #await self._ensure_non_existence(locator)
+        await self._ensure_non_existence(locator)
 
         create_resp = await self._s3_client.create_multipart_upload(
             **self._bucket_key_for(locator)
@@ -255,39 +255,6 @@ class EffectfulFilerS3Backend(
         )
 
 
-async def rechunk(
-    source: AsyncIterable[bytes], chunk_size: int
-) -> AsyncIterator[bytes]:
-    buf = bytearray()
-    async for piece in source:
-        buf.extend(piece)
-        while len(buf) >= chunk_size:
-            yield bytes(buf[:chunk_size])
-            del buf[:chunk_size]
-    if buf:
-        yield bytes(buf)
-
-
-async def _file_reader(path: str, read_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
-    async with await open_file(path, "rb") as f:
-        while True:
-            piece = await f.read(read_size)
-            if not piece:
-                break
-            yield piece
-
-
-async def main(params: FilerBackendS3Parameters):
-    client = EffectfulFilerS3Backend(params)
-
-    async with client:
-        await client.upload_stream_in_chunks(
-            key="out/example-upload.bin",
-            source=_file_reader("C:\\windows\\system32\\wmp.dll"),
-            chunk_size=8 * 1024 * 1024,
-        )
-
-
 if __name__ == "__main__":
     from basetypes.implementation.dataformat.hashed import MixedMd5Sha256, hash_protocol_for_type
 
@@ -336,6 +303,7 @@ if __name__ == "__main__":
 
             downloaded = await efsb.download_chunk_for_hash_exn(hash, 0, 0x100000)
             print(downloaded[:0x40], '[...]', len(downloaded))
+            await anyio.sleep(3)
             await efsb.delete_content(hash)
 
             downloaded = await efsb.download_chunk_for_hash(hash, 0, 0x10000)

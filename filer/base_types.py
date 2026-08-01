@@ -2,7 +2,7 @@ from basetypes.implementation.basetypes_match import DefaultBaseType
 
 from pydantic import BaseModel
 
-from typing import Literal, List
+from typing import Literal
 from enum import Enum
 
 

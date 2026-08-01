@@ -35,7 +35,7 @@ class ConstraintsParameters(BaseModel):
     maximumSizeWrite: int = 0x1000000
     minimumSizeRead: int = 0x1000
     maximumSizeRead: int = 0x1000000
-    fixedChunkSize: int = -1               # negative = no fixed size chunk required
+    fixedChunkSize: int = 0                # null = no fixed size chunk required
 
 
 # These are params fed to any backend constructor for its own "self-awareness", from an external trusted point of view

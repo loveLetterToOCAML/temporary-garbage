@@ -118,6 +118,12 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
             yield rsrc
 
     @final
+    async def list_valid_resources_exn(self) -> AsyncIterator[HashType]:
+        async for rsrc in self._effectful_backend._list_resources_reorganize_exn():
+            if converted := self.hash_from_resource_locator(rsrc):
+                yield converted
+
+    @final
     async def check_integrity_for_exn(self, hash: HashType, *, chunk_size: int = 0x1000000) -> bool:
         with hash.compute_new() as h:
             size = await self.size_for_hash_exn(hash)
@@ -136,8 +142,9 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
     download_chunk_for_hash = final(encapsulate_exception(exception_to_backend_failure, download_chunk_for_hash_exn))
     delete_content = final(encapsulate_exception(exception_to_backend_failure, delete_content_exn))
     delete_raw_resource = final(encapsulate_exception(exception_to_backend_failure, delete_raw_resource_exn))
-    check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
     list_resources_reorganize = final(encapsulate_exception(exception_to_backend_failure, list_resources_reorganize_exn))
+    list_valid_resources = final(encapsulate_exception(exception_to_backend_failure, list_valid_resources_exn))
+    check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
 
 
 class EffectfulFilerBackendDefault(EffectfulBackend[ExternalResourceLocatorType, BackendFailureType],
