@@ -1,21 +1,20 @@
 from filer.base_exceptions import FilerSerialException, NotExistingPlaceholder, AlreadyUploadedContent, AlreadyUploadingContent, MissingChunks
 from filer.filer_backend.backend_failure import BackendFailure, ExternalFailure, ExternalFailureType
-from filer.filer_backend.backend_impl_fs_opti import none_if_exception
-from filer.filer_backend.backend_protocol import EffectfulFilerBackendWithContextManagement, EffectfulFilerBackend, \
-    EffectfulBackend
+from filer.filer_backend.backend_protocol import EffectfulFilerBackend, EffectfulBackend
 from filer.filer_backend.fixed_chunk_constraint import ensure_compatible_chunk_exn
+from filer.filer_backend.backend_impl_fs_opti import none_if_exception
 from basetypes.implementation.dataformat.hashed import Hashed
 from filer.filer_backend.utils_exn import SerialException
 
 from botocore.exceptions import ClientError
+from anyio import AsyncContextManagerMixin
 from pydantic import Secret, BaseModel
 from botocore.config import Config
 from pydantic_core import Url
-from anyio import open_file, AsyncContextManagerMixin
 import aioboto3
 
-from typing import AsyncIterator, AsyncIterable
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 
 class FilerBackendS3Parameters(BaseModel):
@@ -204,7 +203,7 @@ class EffectfulFilerS3Backend(
     async def download_chunk_from_exn(self, locator: S3ResourceLocator, offset: int, size: int) -> bytes:
         resp = await self._s3_client.get_object(
             **self._bucket_key_for(locator),
-            Range=f"bytes={offset}-{offset + size}"
+            Range=f"bytes={offset}-{offset + size - 1}"
         )
         async with resp['Body'] as stream:
             return await stream.read()
@@ -303,7 +302,7 @@ if __name__ == "__main__":
 
             downloaded = await efsb.download_chunk_for_hash_exn(hash, 0, 0x100000)
             print(downloaded[:0x40], '[...]', len(downloaded))
-            await anyio.sleep(3)
+            await anyio.sleep(30)
             await efsb.delete_content(hash)
 
             downloaded = await efsb.download_chunk_for_hash(hash, 0, 0x10000)

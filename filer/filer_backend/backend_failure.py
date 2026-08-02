@@ -1,13 +1,11 @@
-from typing import Literal
-
 from filer.filer_backend.utils_exn import PydanticException
 from filer.base_exceptions import PydanticFilerException
+from filer.filer_type_registration import FilerType
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from typing import Literal
 from enum import Enum
-
-from filer.filer_type_registration import FilerType
 
 
 # This is already including in the set of Filer exceptions

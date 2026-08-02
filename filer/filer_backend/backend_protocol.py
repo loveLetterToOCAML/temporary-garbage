@@ -143,7 +143,6 @@ class EffectfulFilerBackend(Protocol[HashType, ExternalResourceLocatorType, Back
     delete_content = final(encapsulate_exception(exception_to_backend_failure, delete_content_exn))
     delete_raw_resource = final(encapsulate_exception(exception_to_backend_failure, delete_raw_resource_exn))
     list_resources_reorganize = final(encapsulate_exception(exception_to_backend_failure, list_resources_reorganize_exn))
-    list_valid_resources = final(encapsulate_exception(exception_to_backend_failure, list_valid_resources_exn))
     check_integrity_for = final(encapsulate_exception(exception_to_backend_failure, check_integrity_for_exn))
 
 

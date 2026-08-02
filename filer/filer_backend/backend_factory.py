@@ -1,17 +1,22 @@
 from filer.filer_backend.backend_proxy_constrained import ConstrainedBackendParameters, EffectfulConstrainedFilerBackend
+from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend, FilerBackendOptimizedFsParameters
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters, EffectfulFilerInMemBackend
 from filer.filer_backend.backend_impl_sql import EffectfulFilerSqlBackend, DbBackendInContextParameters
-from filer.filer_backend.backend_impl_fs_opti import EffectfulFilerFsBackend, FilerBackendOptimizedFsParameters
-from basetypes.implementation.dataformat.hashed import Hashed, MixedMd5Sha256
+from filer.filer_backend.backend_impl_s3 import FilerBackendS3Parameters, EffectfulFilerS3Backend
 from filer.filer_backend.backend_remote import RemoteBackendInContextParameters
+from basetypes.implementation.dataformat.hashed import Hashed, MixedMd5Sha256
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters
+from filer.filer_backend.backend_protocol import EffectfulFilerBackend
+from filer.filer_backend.backend_failure import BackendFailure
+
+from typing import Any
 
 
-KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | FilerBackendOptimizedFsParameters | \
+KnownFilerBackendParameters = FilerBackendInMemParameters | FilerBackendFsParameters | FilerBackendOptimizedFsParameters | FilerBackendS3Parameters | \
                               DbBackendInContextParameters | RemoteBackendInContextParameters | ConstrainedBackendParameters
 
 
-def FilerBackendFor(backend_params: KnownFilerBackendParameters):
+def FilerBackendFor(backend_params: KnownFilerBackendParameters) -> EffectfulFilerBackend[Hashed, Any, BackendFailure]:
     match backend_params:
         case FilerBackendInMemParameters():
             return EffectfulFilerInMemBackend(backend_params)
@@ -19,6 +24,8 @@ def FilerBackendFor(backend_params: KnownFilerBackendParameters):
             return EffectfulFilerFsBackend(backend_params)
         case DbBackendInContextParameters():
             return EffectfulFilerSqlBackend()
+        case FilerBackendS3Parameters():
+            return EffectfulFilerS3Backend(backend_params)
         case ConstrainedBackendParameters():
             return EffectfulConstrainedFilerBackend(backend_params)
         case _:

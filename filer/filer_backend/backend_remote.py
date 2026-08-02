@@ -1,26 +1,30 @@
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, TypeVar, AsyncIterator
 
-from anyio import create_task_group, CapacityLimiter, create_memory_object_stream
+from anyio import create_task_group, CapacityLimiter, create_memory_object_stream, AsyncContextManagerMixin
 from pydantic import BaseModel
 
 from basetypes.implementation.basetypes_match import DefaultBaseType
+from basetypes.implementation.dataformat.hashed import Hashed
 from basetypes.implementation.generics_match import DefaultGenericType
 from filer.base_types import UploadContentIntent, UploadChunkIntent, UploadFinished, DeleteContentIntent, \
-    GetContentSizeIntent, GetContentIntent
-from filer.filer_backend.backend_effectful import FilerBackendIntent
-from filer.filer_backend.backend_factory import FilerBackendFor
+    GetContentSizeIntent, GetContentIntent, GetContentUlidForHashIntent, GetContentHashForUlidIntent, \
+    CheckContentForHashAndUlidIntent
+from filer.filer_backend.backend_failure import BackendFailure
+from filer.filer_backend.backend_protocol import EffectfulFilerBackend, EffectfulBackend, BackendFailureType
 
 
 class RemoteBackendInContextParameters(BaseModel):
     pass
+
+ExternalResourceLocatorType = TypeVar('ExternalResourceLocatorType')
 
 class EffectfulRemoteFilerBackend(
     EffectfulFilerBackend[Hashed, ExternalResourceLocatorType, BackendFailure],
     EffectfulBackend[Hashed, BackendFailure],
     AsyncContextManagerMixin
 ):
-    def __init__(self, params: RemoteFilerBackendParameters):
+    def __init__(self, params: RemoteBackendInContextParameters):
         self._params = params
         self._constraints = params.constraintParameters
 
@@ -184,6 +188,9 @@ class Client:
         ):
             yield intent_queue_send
 
+
+FilerBackendIntent = GetContentSizeIntent | GetContentUlidForHashIntent | GetContentHashForUlidIntent | CheckContentForHashAndUlidIntent | \
+    GetContentIntent | UploadContentIntent | DeleteContentIntent
 
 class Server:
 

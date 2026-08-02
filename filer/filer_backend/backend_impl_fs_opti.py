@@ -84,7 +84,8 @@ class HandleCache(AsyncContextManagerMixin):
             try:
                 await self.launch_filename_watchdog(locator)
             finally:
-                await self.dispose(locator)
+                with CancelScope(shield=True):
+                    await self.dispose(locator)
 
     async def launch_filename_watchdog(self, locator: str | PathLike[str] | int):
         async with self._capacity_limiter:
