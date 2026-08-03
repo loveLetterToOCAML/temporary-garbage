@@ -71,7 +71,6 @@ if __name__ == '__main__':
             #    print("====")
             #    await f1.prepare_placeholder_for_hash(Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'a'), 0, 10000)
             #    print("====")
-            print("GO 2")
 
             async with f2 as report2:
                 print(report2)

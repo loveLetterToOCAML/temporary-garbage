@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from abc import ABC
+
 from filer.filer_server.integrity_report import PydanticHashableWithBytesRepr
 
 from pydantic import BaseModel
@@ -49,7 +51,20 @@ class HashProtocol(Protocol):
         ...
 
 
-class Hashed(PydanticHashableWithBytesRepr):  # due to BaseModel metaclass we cannot make the Hashed inherits from HashContextProtocol
+# This is just to simply encapsulate any hash protocol into safe context manager for hash computation limited lifetime
+class HashContextProtocol(ABC):
+
+    @final
+    @contextmanager
+    def compute_new(self) -> Iterator[HashContextProtocol]:
+        hash_state = self.fresh_hash_state()
+        yield hash_state
+
+    def fresh_hash_state(self) -> HashContextProtocol:
+        ...
+
+
+class Hashed(HashContextProtocol, PydanticHashableWithBytesRepr):  # due to BaseModel metaclass we cannot make the Hashed inherits from HashContextProtocol
     hashAlgorithm: HashAlgorithmInstance
     hash: bytes
 
@@ -78,11 +93,8 @@ class Hashed(PydanticHashableWithBytesRepr):  # due to BaseModel metaclass we ca
             hash=hash_raw
         )
 
-    @final
-    @contextmanager
-    def compute_new(self) -> Iterator[HashProtocol]:
-        hash_state = hash_protocol_for_type(self.hashAlgorithm)
-        yield hash_state
+    def fresh_hash_state(self) -> HashContextProtocol:
+        return hash_protocol_for_type(self.hashAlgorithm)
 
 
 class SerializableHash(HashProtocol):
@@ -99,19 +111,6 @@ class SerializableHash(HashProtocol):
             hashAlgorithm=self.hash_algorithm,
             hash=self.digest()
         )
-
-
-# This is just to simply encapsulate any hash protocol into safe context manager for hash computation limited lifetime
-class HashContextProtocol(Protocol):
-
-    @final
-    @contextmanager
-    def compute_new(self) -> Iterator[SerializableHash]:
-        hash_state = self.fresh_hash_state()
-        yield hash_state
-
-    def fresh_hash_state(self) -> SerializableHash:
-        ...
 
 
 class CommonHashProtocol(SerializableHash, HashContextProtocol):

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault, EffectfulFilerBackendWithContextManagement
-from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
 from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
 from filer.filer_server.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_factory import FilerBackendFor, KnownFilerBackendParameters
+from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
 from basetypes.implementation.dataformat.hashed import Hashed
 
