@@ -210,11 +210,17 @@ class EffectfulFilerS3Backend(
 
     async def delete_resource_at_exn(self, locator: S3ResourceLocator, placeholder_index: int = -1):
         if placeholder_index >= 0:
+            await self._s3_client.abort_multipart_upload(
+                **self._bucket_key_for(locator),
+                UploadId=self._upload_ids_for[(locator, placeholder_index)]
+            )
             del self._currently_uploading[locator]
             del self._upload_status_for[(locator, placeholder_index)]
             del self._upload_ids_for[(locator, placeholder_index)]
             del self._expected_total_size_for[(locator, placeholder_index)]
-        await self._s3_client.delete_object(**self._bucket_key_for(locator))
+            return
+        await self._s3_client.head_object(**self._bucket_key_for(locator))  # just ensure the object is existing before deleting it
+        return await self._s3_client.delete_object(**self._bucket_key_for(locator))
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[S3ResourceLocator]:
         async for page in self._s3_client.get_paginator('list_objects_v2').paginate(Bucket=self._params.bucketName):

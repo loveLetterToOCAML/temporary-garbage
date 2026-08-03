@@ -139,7 +139,6 @@ class UploadHandler:
                  chunk_size: int, backend: EffectfulFilerBackend[Hashed, Any, BackendFailure], *,
                  expected_length: int | None = None, maximum_length: int | None = None, locator: Hashed | None = None,
                  allow_smaller_chunks: bool = True, allow_bigger_chunks: bool = True):
-        print(type(input_data))
         self._input_data = input_data
         self._chunk_size = chunk_size
         self._backend = backend
@@ -149,17 +148,26 @@ class UploadHandler:
         self._allow_smaller_chunks = allow_smaller_chunks
         self._allow_bigger_chunks = allow_bigger_chunks
 
+        if self._locator and isinstance(self._input_data, bytes):
+            self._chunk_generator = self.generate_chunks_from_raw_data
+        elif self._locator and hasattr(self._input_data, '__call__'):
+            self._chunk_generator = self._input_data
+        elif self._locator and hasattr(self._input_data, '__aiter__'):
+            self._chunk_generator = lambda: self._input_data
+        else:
+            self._chunk_generator = None
+
+    async def generate_chunks_from_raw_data(self):
+        for offset in range(0, self._expected_length, self._chunk_size):
+            yield self._input_data[offset: offset + self._chunk_size]
+
     def _update_locator_and_data_generator_from_raw_data(self):
         self._expected_length = len(self._input_data)
         with hash_protocol_for_type(MixedMd5Sha256()).compute_new() as h:
             for offset in range(0, self._expected_length, self._chunk_size):
                 h.update(self._input_data[offset: offset + self._chunk_size])
             self._locator = Hashed(hashAlgorithm=MixedMd5Sha256(), hash=h.digest())
-
-        async def generate_chunks_from_raw_data():
-            for offset in range(0, self._expected_length, self._chunk_size):
-                yield self._input_data[offset: offset + self._chunk_size]
-        self._chunk_generator = generate_chunks_from_raw_data()
+        self._chunk_generator = self.generate_chunks_from_raw_data
 
     async def _update_locator_and_data_generator_after_first_pass(self):
         self._expected_length = 0
@@ -168,7 +176,7 @@ class UploadHandler:
                 h.update(chunk)
                 self._expected_length += len(chunk)
             self._locator = Hashed(hashAlgorithm=MixedMd5Sha256(), hash=h.digest())
-        self._chunk_generator = self._input_data()
+        self._chunk_generator = self._input_data
 
     async def _update_locator_and_data_generator_after_cache(
             self, placeholder_index: int, chunk_generator: AsyncIterator[bytes],
@@ -191,7 +199,7 @@ class UploadHandler:
             async def generate_data_from_cache():
                 for offset in range(0, self._expected_length, self._chunk_size):
                     yield await cache_backend.download_chunk_for_hash_exn(fake_locator, offset, self._chunk_size)
-            self._chunk_generator = generate_data_from_cache()
+            self._chunk_generator = generate_data_from_cache
 
     async def handle_upload(self, write_limiter, placeholder_index: int,
                             on_success: Callable | None = None, on_failure: Callable | None = None,
@@ -236,7 +244,7 @@ class UploadHandler:
                     buffer = buffer[max_size:]
                     return
 
-                async for chunk in self._chunk_generator:
+                async for chunk in self._chunk_generator():
                     buffer += chunk
                     if len(buffer) < self._chunk_size and self._allow_smaller_chunks:
                         await send_buffer(len(buffer))
@@ -369,7 +377,7 @@ class FilerBackendClient(AsyncContextManagerMixin):
             tg.start_soon(self._timeout_after, tg.cancel_scope)
             queued = self._check_if_available_queue(locator, maximum_size)
             if not queued:
-                raise RetryLater()
+                raise RetryLater(f"Maximum size too big to enter local cache queue (asked {maximum_size} while max {self._queue_fs.storage_capcacity})")
             elem, queue = queued
             await elem.onSend.wait()
             tg.cancel_scope.cancel()
@@ -378,12 +386,15 @@ class FilerBackendClient(AsyncContextManagerMixin):
             queue.failure_for(locator)
         raise RetryLater()
 
+    def _optimized_buffer_size(self):  # max 4 Mb buffer size
+        return 0x400000 // self._client_params.chunkSize
+
     @contextlib.asynccontextmanager
     async def upload_data_one_pass(self, locator: Hashed, expected_length: int) -> AsyncIterator[MemoryObjectSendStream[Hashed]]:
-        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](0x20)
+        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](self._optimized_buffer_size())
         async with (
+            chunk_receiver,
             create_task_group() as tg,
-            chunk_receiver
         ):
             upload_handler = UploadHandler(chunk_receiver, self._client_params.chunkSize, self._backend,
                                            expected_length=expected_length, locator=locator,
@@ -395,7 +406,7 @@ class FilerBackendClient(AsyncContextManagerMixin):
 
     @contextlib.asynccontextmanager
     async def upload_data(self, maximum_length: int) -> AsyncIterator[MemoryObjectSendStream[bytes]]:
-        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](0x20)
+        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](self._optimized_buffer_size())
         async with (
             chunk_receiver,
             create_task_group() as tg,
@@ -429,10 +440,10 @@ class FilerBackendClient(AsyncContextManagerMixin):
 
     @contextlib.asynccontextmanager
     async def download_data(self, locator: Hashed) -> AsyncIterator[MemoryObjectReceiveStream[bytes]]:
-        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](0x20)
+        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](self._optimized_buffer_size())
         async with (
+            chunk_sender,
             create_task_group() as tg,
-            chunk_sender
         ):
             download_handler = DownloadHandler(locator, self._client_params.chunkSize, self._backend, chunk_sender)
             tg.start_soon(download_handler.handle_download)
@@ -450,6 +461,9 @@ class FilerBackendClient(AsyncContextManagerMixin):
         async for chunk in download_handler.handle_download_gen():
             yield chunk
 
+
+    async def delete_data_exn(self, locator: Hashed):
+        return await self._backend.delete_content_exn(locator)
 
     async def delete_data(self, locator: Hashed):
         return await self._backend.delete_content(locator)
@@ -523,6 +537,9 @@ if __name__ == '__main__':
             async for hash in client.list_available():
                 print(hash)
 
+                # data to download is hashAlgorithm=HashAlgorithmInstance(type=<HashAlgorithm.MIXED_MD5_SHA256: 3>, hashParameters=None) hash=b"\x10m`\xa7P\x8f\xc5\x81\x9dI\x8d;\xdc\xaa\xc8{\xf8\x0eU\xac3\x13\x0f(\x9ai}\xedF'\x0b\xd6Y\nY\x8d\x03\xa6=\rFH\x04\xfb\xa8Um\xe8"
+                # to relate to backend_impl_s3.py main with double C:\\windows\\system32\\wmp.dll
+
                 data = b''
                 print("doing dl 1")
                 async for chunk in client.download_data_gen(hash):
@@ -541,57 +558,51 @@ if __name__ == '__main__':
                         print(hex(len(chunk)))
 
                 h = Hashed(hashAlgorithm=MixedMd5Sha256(), hash=b'Vl.\xa8~+Vt\xc8\x8f\xe8\x93\xc73\xda\x1cm:\xa9\x12\xe8\xffpH\x08(\xe8\nzb\xa2 \xbe\xc4\x92=\xdf^|\xca\x8f\xef\xa3U\x0f\n\x9b\x85')
-                print(await client.delete_data(h))
+
+                async def async_data_gen():
+                    for offset in range(0, len(data), 0x100000):
+                        yield data[offset: offset + 0x100000]
+
+                def async_data_send():
+                    return async_data_gen()
+
+
+                print("deletion before dl 1", await client.delete_data(h))
                 print("doing up 1")
                 async with (
                     client.upload_data(0x1000000) as send_obj,
                     send_obj
                 ):
-                    for offset in range(0, len(data), 0x10000):
-                        await send_obj.send(data[offset: offset+0x10000])
+                    with hash_protocol_for_type(MixedMd5Sha256()).compute_new() as h:
+                        for offset in range(0, len(data), 0x100000):
+                            await send_obj.send(data[offset: offset+0x100000])
+                            h.update(data[offset: offset+0x100000])
+                    h = Hashed(hashAlgorithm=MixedMd5Sha256(), hash=h.digest())
 
-                print(await client.delete_data(h))
+                print("data deletion returned", await client.delete_data(h))
                 print("doing up 2")
-                await client.upload_data_from(data, 0x1000000)
+                async with (
+                    client.upload_data_one_pass(h, len(data)) as send_obj,
+                    send_obj
+                ):
+                    for offset in range(0, len(data), 0x100000):
+                        await send_obj.send(data[offset: offset + 0x100000])
 
-                print(await client.delete_data(h))
-                print("doing up 3")
-                await client.upload_data_from(data, 0x1000000)
+                data_or_generator = [
+                    data,
+                    async_data_gen,
+                    async_data_send
+                ]
 
-                print(await client.delete_data(h))
-                print("doing up 4")
-                await client.upload_data_from(data, 0x1000000)
+                for x in data_or_generator:
+                    print("data deletion returned", await client.delete_data(h))
+                    print("doing up 3")
+                    await client.upload_data_from(x, 0x1000000)
+
+                    print("data deletion returned", await client.delete_data(h))
+                    print("doing up 4")
+                    await client.upload_data_one_pass_from(h, len(data), x)
+
+                return
 
     anyio.run(main)
-
-
-"""
-    @contextlib.asynccontextmanager
-    async def upload_data_one_pass(self, locator: Hashed, expected_length: int) -> AsyncIterator[MemoryObjectSendStream[Hashed]]:
-        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](0x100)
-        async with (
-            create_task_group() as tg,
-            chunk_receiver
-        ):
-            upload_handler = UploadHandler(chunk_receiver, locator, expected_length)
-            tg.start_soon(upload_handler.handle_upload, self._write_limiter)
-            yield chunk_sender
-
-    @contextlib.asynccontextmanager
-    async def upload_data(self, maximum_length) -> AsyncIterator[MemoryObjectSendStream[bytes]]:
-        chunk_sender, chunk_receiver = create_memory_object_stream[bytes](0x100)
-        async with (
-            create_task_group() as tg,
-            chunk_receiver
-        ):
-            upload_handler = UploadHandler(chunk_receiver)
-            tg.start_soon(upload_handler.handle_upload, self._write_limiter)
-            yield chunk_sender
-
-    async def upload_data_one_pass_from(self, locator: Hashed, expected_length: int, data: bytes | AsyncIterator[bytes] | Callable[[], AsyncIterator[bytes]]) -> Hashed:
-        upload_handler = UploadHandler(data, locator, expected_length)
-        self._task_group.start_soon(upload_handler.handle_upload, self._write_limiter)
-
-    async def upload_data_from(self, data: bytes | AsyncIterator[bytes] | Callable[[], AsyncIterator[bytes]]) -> Hashed:
-        upload_handler = UploadHandler(data)
-        self._task_group.start_soon(upload_handler.handle_upload, self._write_limiter)"""
