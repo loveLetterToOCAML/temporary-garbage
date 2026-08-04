@@ -189,8 +189,7 @@ class Client:
             yield intent_queue_send
 
 
-FilerBackendIntent = GetContentSizeIntent | GetContentUlidForHashIntent | GetContentHashForUlidIntent | CheckContentForHashAndUlidIntent | \
-    GetContentIntent | UploadContentIntent | DeleteContentIntent
+FilerBackendIntent = GetContentSizeIntent | GetContentIntent | UploadContentIntent | DeleteContentIntent
 
 class Server:
 

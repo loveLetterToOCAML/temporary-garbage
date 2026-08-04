@@ -97,7 +97,7 @@ class Hashed(HashContextProtocol, PydanticHashableWithBytesRepr):  # due to Base
         return hash_protocol_for_type(self.hashAlgorithm)
 
 
-class SerializableHash(HashProtocol):
+class SerializableHash(HashProtocol, HashContextProtocol):
 
     def __init__(self, alg_type: HashAlgorithmInstance):
         self._alg_type = alg_type
@@ -153,7 +153,7 @@ class MixedHashProtocol(SerializableHash, HashContextProtocol):
         return MixedHashProtocol(self.hash_algorithm, *self._base_classes)
 
 
-def hash_protocol_for_type(hash_instance: HashAlgorithmInstance) -> HashContextProtocol:
+def hash_protocol_for_type(hash_instance: HashAlgorithmInstance) -> SerializableHash:
     match hash_instance.type:
         case HashAlgorithm.SHA256:
             return CommonHashProtocol(hash_instance, sha256)

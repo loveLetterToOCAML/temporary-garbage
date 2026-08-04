@@ -54,7 +54,7 @@ class EffectfulFilerServer(Protocol[HashType, ServerFailureType]):
     async def list_items(self, request: ListQueryType) -> ListQueryResponseType:
         ...
 
-    async def list_items_of_type(self, item_type: type[X], request: ListQueryType) -> ListQueryResponseType[X]:
+    async def list_items_of_type(self, item_type: type[HashType | str | MetadataType | int | Any], request: ListQueryType) -> ListQueryResponseType[HashType | str | MetadataType | int | Any]:
         ...
 
     async def hash_for_ulid_exn(self, ulid: UlidType) -> HashType | None:
