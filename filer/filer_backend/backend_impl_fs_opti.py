@@ -131,6 +131,7 @@ class EffectfulFsBackendOptimized(EffectfulBackend[Path, BackendFailure], AsyncC
         if os.path.isfile(locator):
             raise FilerSerialException(
                 AlreadyUploadedContent(
+                    existingUlid=None,
                     hashAttempted=bytes.fromhex(locator.name)
                 )
             )

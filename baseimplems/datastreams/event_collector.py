@@ -92,8 +92,8 @@ class EventCollector(AsyncContextManagerMixin):
     @asynccontextmanager
     async def __asynccontextmanager__(self):
         async with (
+            self._send_event,
             create_task_group() as self._task_group,
-            self._send_event
         ):
             for hdlr in self._sync_handlers:
                 self._handlers_ok[(hdlr, True)] = True

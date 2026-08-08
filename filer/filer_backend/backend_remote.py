@@ -227,9 +227,9 @@ class Server:
         self._send_output_processed, receive_output_processed = create_memory_object_stream[FilerObject]()
         self._internal = FilerBackendFor(self._params.backend)
         async with (
-            create_task_group() as self._process_intents_task,
             intent_queue_send,
-            receive_output_processed
+            receive_output_processed,
+            create_task_group() as self._process_intents_task,
         ):
             self._process_intents_task.start_soon(self._process_intents)
             yield intent_queue_send, receive_output_processed

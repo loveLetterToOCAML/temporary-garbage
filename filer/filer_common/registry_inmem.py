@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from filer.filer_common.registry_protocol import Registry, SimpleListQueryRequest, SimpleListQueryResponse, \
     RegistryInContext
-from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType
+from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent
+from filer.filer_backend_with_registry.integrity_report import HashableWithBytesRepr
+from filer.filer_backend.backend_failure import RegistryFailure
 from filer.filer_backend.utils_proto import ReprEnforced
 
 from sortedcontainers import SortedDict
@@ -11,7 +13,7 @@ from pydantic import BaseModel
 from typing import TypeVar
 
 
-HashType = TypeVar('HashType', bound=ReprEnforced)
+HashType = TypeVar('HashType', bound=HashableWithBytesRepr)
 UlidType = TypeVar('UlidType', bound=ReprEnforced)
 MetadataType = TypeVar('MetadataType', bound=BaseModel)
 
@@ -66,11 +68,23 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
 
     async def new_item_exn(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0) -> UlidType:
         if hash in self._ulids_for_hashes:
-            raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
+            raise FilerSerialException(
+                AlreadyUploadedContent(
+                    existingUlid=self._ulids_for_hashes[hash],
+                    hashAttempted=bytes(hash)
+                )
+            )
+            # raise Exception(f"Already known {hash} with ulid {self._ulids_for_hashes}")
 
         ulid = self._ulid_type()
         if ulid in self._hashes_for_ulids:
-            raise Exception(f"Generated ulid {ulid} already in internal state, should not happen")
+            raise FilerSerialException(
+                AlreadyUploadedContent(
+                    existingUlid=ulid,
+                    hashAttempted=bytes(hash)
+                )
+            )
+            # raise Exception(f"Generated ulid {ulid} already in internal state, should not happen")
         self._hashes_for_ulids[ulid] = hash
         self._ulids_for_hashes[hash] = ulid
         self._metadata_for_hashes[hash] = item_metadata
@@ -129,12 +143,7 @@ class InMemRegistry(Registry[HashType, UlidType, MetadataType]):
         return await self.resolve_query(request.offset, request.limit, hash_source, data_source)
 
     def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
-        return RegistryFailure(
-            failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
-            humanMessage=f"{exn}",
-            retryable=False,
-            originalException=exn
-        )
+        return self.default_serialize_registry_failure_exception(exn)
 
     def dump_state(self):
         return {

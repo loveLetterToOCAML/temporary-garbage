@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault, EffectfulFilerBackendWithContextManagement
+from filer.filer_backend_with_registry.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
 from filer.base_exceptions import NotExistingContent, FilerSerialException, AlreadyUploadedContent
 from filer.filer_common.registry_factory import FilerRegistryFor, KnownFilerRegistryParameters
-from filer.filer_server.integrity_report import IntegrityReport, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_factory import FilerBackendFor, KnownFilerBackendParameters
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters
 from filer.filer_backend.backend_failure import BackendFailure, RegistryFailure
@@ -82,11 +82,11 @@ class EffectfulFilerServer(
                 yield report
 
     async def size_of_content_at_exn(self, locator: HashType) -> int:
-        sz = await self._registry.size_for_hash_exn(hash)
+        sz = await self._registry.size_for_hash_exn(locator)
         if sz:
             return sz
         if self._init_parameters and self._init_parameters.allowedExternalModifications:  # in this case perform a dynamic recheck
-            sz = await self._backend.size_of_content_at_exn(locator)
+            sz = await self._backend.size_for_hash_exn(locator)
             await self._registry.new_item_exn(locator, new_metadata, sz)
         if not sz:
             raise FilerSerialException(
@@ -118,35 +118,35 @@ class EffectfulFilerServer(
 
     async def prepare_placeholder_at_exn(self, locator: Hashed, placeholder_index: int, total_size: int):
         await self._ensure_not_existing(locator)
-        await self._backend.prepare_placeholder_at_exn(locator, placeholder_index, total_size)
+        await self._backend.prepare_placeholder_for_hash_exn(locator, placeholder_index, total_size)
 
     async def upload_chunk_at_exn(self, locator: Hashed, placeholder_index: int, offset: int, data: bytes) -> int:
         await self._ensure_not_existing(locator)
-        return await self._backend.upload_chunk_at_exn(locator, placeholder_index, offset, data)
+        return await self._backend.upload_chunk_for_hash_exn(locator, placeholder_index, offset, data)
 
     async def upload_terminate_at_exn(self, locator: Hashed, placeholder_index: int):
         await self._ensure_not_existing(locator)
-        await self._backend.upload_terminate_at_exn(locator, placeholder_index)
+        await self._backend.upload_terminate_for_hash(locator, placeholder_index)
         # TODO: check the terminate is ok (hash & size match)
         upload_ok = True
         if upload_ok:
-            sz = await self._backend.size_of_content_at_exn(locator)
+            sz = await self._backend.size_for_hash_exn(locator)
             await self._registry.new_item_exn(locator, new_metadata, sz)
 
     async def download_chunk_from_exn(self, locator: Hashed, offset: int, size: int) -> bytes:
         await self._ensure_existing(locator)
-        return await self._backend.download_chunk_from_exn(locator, offset, size)
+        return await self._backend.download_chunk_for_hash_exn(locator, offset, size)
 
     async def delete_resource_at_exn(self, locator: Hashed, placeholder_index: int = -1):
         if placeholder_index >= 0:
-            await self._backend.delete_resource_at_exn(locator, placeholder_index)
+            await self._backend.delete_content_exn(locator, placeholder_index)
         else:
             await self._ensure_existing(locator)
-            await self._backend.delete_resource_at_exn(locator, -1)
+            await self._backend.delete_content_exn(locator, -1)
             await self._registry.delete_item_exn(locator)
 
     async def _list_resources_reorganize_exn(self) -> AsyncIterator[Hashed]:
-        async for hash in self._backend._list_resources_reorganize_exn():
+        async for hash in self._backend.list_resources_reorganize_exn():
             yield hash
 
     def serialize_backend_failure_exception(self, exn: Exception) -> BackendFailure:

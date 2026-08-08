@@ -1,8 +1,8 @@
 from filer.filer_backend.backend_proxy_constrained import GenericBackendParameters, ConstrainedBackendParameters
+from filer.filer_backend_with_registry.server_base_glue import FilerServerParameters, FilerServerInitParameters
 from filer.filer_common.registry_factory import InMemRegistryParameters, DbRegistryInContextParameters
-from filer.filer_context import file_registry_path_for, sqlite_registry_path_for, file_backend_basepath_for
-from filer.filer_server.server_base import FilerServerParameters, FilerServerInitParameters
 from basetypes.implementation.dataformat.compression import Lz4, LZ4CompressionParameters
+from filer.filer_context import file_registry_path_for, file_backend_basepath_for
 from filer.filer_backend.backend_impl_inmem import FilerBackendInMemParameters
 from filer.filer_backend.backend_impl_sql import DbBackendInContextParameters
 from filer.filer_backend.backend_impl_fs import FilerBackendFsParameters

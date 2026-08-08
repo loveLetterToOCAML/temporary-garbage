@@ -168,6 +168,7 @@ if __name__ == '__main__':
 
     async def test():
         async with NamedTemporaryFile(mode="w+", suffix='.yml', delete_on_close=False) as f:
+            print(f"[+] Created registry at {f.name}")
             async with FsRegistryInContext[bytes, UlidWrapper, M](params=FsRegistryParameters(mock=True), hash_type=bytes, ulid_type=UlidWrapper, metadata_type=M) as mock:
                 print(await mock.new_item(b'x', M(a=123), 186))
                 print(await mock.new_item(b'y', M(b='metadata'), 80870))

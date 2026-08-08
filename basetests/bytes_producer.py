@@ -139,8 +139,8 @@ if __name__ == '__main__':
         async with (
             run_with_event_collector(),
             stream_event_collector.get(),
-            create_task_group() as tg,
             StatsForStreamProcessing() as (send_intent, receive_stats),
+            create_task_group() as tg,
         ):
             event = Event()
 

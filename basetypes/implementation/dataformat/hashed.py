@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 
-from filer.filer_server.integrity_report import PydanticHashableWithBytesRepr
+from filer.filer_backend_with_registry.integrity_report import PydanticHashableWithBytesRepr
 
 from pydantic import BaseModel
 

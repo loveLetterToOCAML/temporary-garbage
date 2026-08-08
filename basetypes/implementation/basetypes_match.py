@@ -67,7 +67,11 @@ class DefaultBaseType:
     TIMEDELTA = datetime.timedelta
 
     UUID = Uuid
-    ULID = Ulid
+    try:
+        from ulid import ULID
+        ULID = ULID
+    except:
+        ULID = Ulid
 
     JSON_STRING = Json
     YAML_STRING = Yaml

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from filer.filer_backend.backend_failure import RegistryFailure
+from filer.filer_backend.backend_failure import RegistryFailure, ExternalFailure, ExternalFailureType
 from baseimplems.anyio_utils import NotInAsyncContextManager
+from filer.filer_backend.utils_exn import SerialException
 
 from anyio import AsyncContextManagerMixin
 
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
-from typing import Protocol, TypeVar, Generic, AsyncIterator, Any
+from typing import Protocol, TypeVar, Generic, AsyncIterator, Any, final
 from dataclasses import dataclass
 from functools import wraps
 
@@ -58,10 +59,10 @@ class SimpleListQueryResponse(Generic[T]):
 
 class Listable(Protocol[T, X]):
 
-    async def list_items(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[T]:
+    async def list_items_exn(self, request: SimpleListQueryRequest) -> SimpleListQueryResponse[T]:
         ...
 
-    async def list_items_of_type(self, item_type: type[X], request: SimpleListQueryRequest) -> SimpleListQueryResponse[X]:
+    async def list_items_of_type_exn(self, item_type: type[X], request: SimpleListQueryRequest) -> SimpleListQueryResponse[X]:
         ...
 
 
@@ -95,6 +96,22 @@ class Registry(Listable[MetadataType, HashType | UlidType | MetadataType | Any],
 
     def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
         ...
+
+    @final
+    def default_serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
+        if isinstance(exn, SerialException):
+            return RegistryFailure(
+                failure=exn.serialized,
+                humanMessage=exn.serialized.humanMessage or 'FilerException::FilerRegistry exception',
+                retryable=False
+            )
+
+        return RegistryFailure(
+            failure=ExternalFailure(externalFailureType=ExternalFailureType.InternalError),
+            humanMessage='FilerException::FilerRegistry::InternalError',
+            retryable=False,
+            originalException=exn
+        )
 
 
 def guarded(func):

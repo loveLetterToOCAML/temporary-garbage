@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from filer.base_exceptions import FilerSerialException, AlreadyUploadedContent, MultiplePydanticFilerException, \
     NotExistingPlaceholder
-from filer.filer_server.server_base import FilerServerParameters, BackendFailureType, PydanticHashableWithBytesRepr
+from filer.filer_backend_with_registry.server_base_glue import FilerServerParameters, BackendFailureType, PydanticHashableWithBytesRepr
 from filer.filer_backend.backend_protocol import EffectfulFilerBackendDefault
 from filer.filer_backend.backend_failure import BackendFailure
 
@@ -175,7 +175,7 @@ class EffectfulFilerServerChain(
 
     @asynccontextmanager
     async def __asynccontextmanager__(self):
-        from filer.filer_server.server_factory import FilerServerFor
+        from filer.filer_backend_with_registry.server_factory import FilerServerFor
 
         self._faster = FilerServerFor(self._faster_params)
         self._slower = FilerServerFor(self._slower_params)

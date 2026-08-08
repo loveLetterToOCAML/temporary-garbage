@@ -1,5 +1,6 @@
 from filer.filer_common.registry_fs import FsRegistryParameters, FsRegistryInContext
 from filer.filer_common.registry_inmem import InMemRegistryInContext
+from baseimplems.date_utils import utc_now
 
 from pydantic import BaseModel
 from ulid import ULID
@@ -30,8 +31,8 @@ class UlidWrapper(ULID):
 
 
 class SimpleRegistryMetadataPydantic(BaseModel):
-    dateBeginUpload: datetime
-    dateEndUpload: datetime
+    dateBeginUpload: datetime = utc_now()
+    dateEndUpload: datetime = utc_now()
     numberOfAccesses: int = 0
 
 
@@ -64,9 +65,8 @@ def FilerRegistryFor(registry_params: KnownFilerRegistryParameters):
 
 if __name__ == '__main__':
     from baseimplems.persistence.sqlalchemy_persist import run_with_temporarily_persistent_mock_db_engine
-    from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy, SQLiteDatabaseRegistryCreateDbContext
+    from filer.filer_common.registry_db import SimpleRegistryMetadataSqlalchemy
     from filer.filer_common.registry_protocol import SimpleListQueryRequest
-    from baseimplems.date_utils import utc_now
 
     import anyio
 

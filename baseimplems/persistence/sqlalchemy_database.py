@@ -53,6 +53,7 @@ class SqlalchemyBaseHandler(AsyncContextManagerMixin):
             try:
                 yield self._session
             finally:
+                await self._session.close()
                 current_sqlalchemy_session.reset(prev)
                 from baseimplems.persistence.mixins import commit_and_rollback_if_exception
                 await commit_and_rollback_if_exception(self._session)

@@ -116,8 +116,8 @@ class FilerRegistry(AsyncContextManagerMixin):
         self._semaphore = Semaphore(0x10)
 
         async with (
+            self._backends,
             create_task_group() as task_group,
-            self._backends
         ):
             task_group.start_soon(self._process_intents, task_group)
             yield external_send_intent

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from filer.base_exceptions import FilerSerialException, NotExistingContent, AlreadyUploadedContent
 from filer.filer_common.registry_protocol import Registry, SimpleListQueryRequest, SimpleListQueryResponse, \
     RegistryInContext
 from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy, with_auto_session, \
@@ -7,12 +8,14 @@ from baseimplems.persistence.sqlalchemy_database import run_within_sqlalchemy, w
 from baseimplems.persistence.model_utils.model_utils_common import TWithID, TWithBytesHash, TWithStringHash, WithID
 from baseimplems.persistence.mixins import RepositoryMixin, commit_and_rollback_if_exception, BaseMixins
 from filer.filer_common.registry_db_model.model import RegistryMetadataTable_for
+from filer.filer_backend_with_registry.integrity_report import HashableWithBytesRepr
+from basetypes.implementation.basetypes_match import DefaultBaseType
 from filer.filer_backend.backend_failure import RegistryFailure
+from baseimplems.date_utils import utc_now
 
 from sqlalchemy.orm import Mapped, joinedload, mapped_column
 from sqlalchemy import Integer, select, func, DateTime
 from sqlalchemy.ext.asyncio import AsyncSession
-from ulid import ULID
 
 from contextlib import asynccontextmanager
 from typing import TypeVar, Type, Any
@@ -20,15 +23,17 @@ from datetime import datetime
 from types import NoneType
 
 
-HashType = TypeVar('HashType')
+ULID = DefaultBaseType.ULID
+
+HashType = TypeVar('HashType', bound=HashableWithBytesRepr)
 MetadataType = TypeVar('MetadataType', bound=RepositoryMixin)
 
 
 class SimpleRegistryMetadataSqlalchemy(WithID, *BaseMixins):
     __tablename__ = 'SimpleRegistryMetadata'
 
-    date_begin_upload: Mapped[datetime] = mapped_column(DateTime)
-    date_end_upload: Mapped[datetime] = mapped_column(DateTime)
+    date_begin_upload: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    date_end_upload: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     number_of_accesses: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -94,7 +99,13 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
     async def new_item_exn(self, hash: HashType, item_metadata: MetadataType, size_of_data: int = 0, *, session: AsyncSession) -> ULID:
         already_there = await self._metadata_type.get_for(hash=hash)
         if already_there:
-            raise Exception(f"Already known {hash} with ulid {already_there.ulid}")
+            raise FilerSerialException(
+                AlreadyUploadedContent(
+                    existingUlid=already_there.ulid,
+                    hashAttempted=bytes(hash)
+                )
+            )
+            # raise Exception(f"Already known {hash} with ulid {already_there.ulid}")
         new_obj = await self._metadata_type.create(hash=hash, metadata_instance=item_metadata, size=size_of_data)
         await commit_and_rollback_if_exception(session)
         return new_obj.ulid
@@ -103,7 +114,13 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
     async def delete_item_exn(self, hash: HashType) -> bool | None:
         already_there = await self._metadata_type.get_for(hash=hash)
         if not already_there:
-            raise Exception(f"Metadata for hash {hash} does not exist, no deletion possible")
+            raise FilerSerialException(
+                NotExistingContent(
+                    inputHash=bytes(hash),
+                    hasExisted=self.metadata_for_hash_exn(hash) is True
+                )
+            )
+            # raise Exception(f"Metadata for hash {hash} does not exist, no deletion possible")
         if self._delete_metadata_info_on_delete:
             await already_there.delete()
         else:
@@ -174,7 +191,7 @@ class DatabaseRegistry(Registry[HashType, ULID, MetadataType]):
         )
 
     def serialize_registry_failure_exception(self, exn: Exception) -> RegistryFailure:
-        raise exn
+        return self.default_serialize_registry_failure_exception(exn)
 
 
 class DatabaseRegistryInContext(RegistryInContext[HashType, ULID, MetadataType]):
@@ -229,8 +246,13 @@ if __name__ == '__main__':
     async def test():
         async with (
             run_with_temporarily_persistent_mock_db_engine(echo=False),
-            DatabaseRegistryInContext[bytes, M](hash_type=bytes, metadata_type=M) as mock
+            DatabaseRegistryInContext[bytes, M](hash_type=bytes, metadata_type=M) as mock,
+            DatabaseRegistryInContext[bytes, SimpleRegistryMetadataSqlalchemy](
+                hash_type=bytes, metadata_type=SimpleRegistryMetadataSqlalchemy
+            ) as mock2
         ):
+            print(await mock2.new_item(b'x', SimpleRegistryMetadataSqlalchemy(), size_of_data=800))
+            print(await mock2.list_items(SimpleListQueryRequest(limit=1)))
             print(await mock.new_item(b'x', M(a=123), size_of_data=150))
             print(await mock.new_item(b'y', M(a=999), size_of_data=10))
             print(await mock.new_item(b'y', M(a=8), size_of_data=100))
