@@ -106,7 +106,7 @@ class AuthenticatedObject(Generic[O, S]):
         return self.signature.signer_identity()
 
     def is_signature_valid_exn(self) -> bool:
-        return self.signature.verify(self.object.serialized)
+        return self.signature.verify(self.identity(), self.object.serialized)
 
     def check_signature_exn(self):
         if not self.is_signature_valid_exn():

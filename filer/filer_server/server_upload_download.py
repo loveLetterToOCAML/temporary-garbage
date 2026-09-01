@@ -1,26 +1,17 @@
-from contextlib import asynccontextmanager
-
-from attr.exceptions import NotCallableError
-
-from baseimplems.date_utils import utc_now
-from basetypes.implementation.dataformat.hashed import Hashed
+from filer.filer_server.server_protocol import UploadTicket, AuthenticatedProofOfKnowledgeRequestTicket, DownloadTicket, DeleteContentTicket
 from filer.base_exceptions import NotExistingContent, NotExistingPlaceholder, FilerSerialException
-from filer.filer_backend_with_registry.server_factory import FilerServerFor
-from filer.filer_common.registry_factory import KnownFilerRegistryParameters
-from filer.filer_common.registry_protocol import SimpleListQueryRequest, SimpleListQueryResponse, Registry
-from baseimplems.datastreams.constrained import StreamConstraints, StreamInformation
 from filer.filer_backend_with_registry.integrity_report import HashableWithBytesRepr
+from filer.filer_backend_with_registry.server_factory import FilerServerFor
+from baseimplems.datastreams.constrained import StreamInformation
+from basetypes.implementation.dataformat.hashed import Hashed
 from baseimplems.datastreams.stream_event import StreamEvent
-
-from typing import Protocol, TypeVar, Generic
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from baseimplems.date_utils import utc_now
 
 from pydantic import BaseModel
 
-from filer.filer_server.server_protocol import UploadTicket, AuthenticatedProofOfKnowledgeRequestTicket, \
-    ProofOfKnowledgeRequestTicket, DownloadTicket, DeleteContentTicket
-from filer.filter_registry.registry import FilerRegistry
+from contextlib import asynccontextmanager
+from typing import TypeVar
+
 
 ServerFailureType = TypeVar('ServerFailureType')
 
@@ -45,7 +36,7 @@ O = TypeVar('O')  # abstract signed object
 
 
 class EffectfulFilerServerOrchestrator(
-
+    EnsureContentIntegrity[A]
 ):
 
     def __init__(self, server_params: KnownServerParameters):
@@ -87,7 +78,7 @@ class EffectfulFilerServerOrchestrator(
         return await self._server.upload_chunk_at_exn(upload_ticket.hash, self._unique_operations[ticket_id], offset, data)
 
 
-    async def _ensure_existing(self, ticket: UploadTicket[ContextType, H, R, I, U] | DownloadTicket[C, H, R, I] | DeleteContentTicket[C, H, R, I]):
+    async def _ensure_existing(self, ticket: UploadTicket[ContextType, H, R, I, U] | DownloadTicket[C, H, R, I]):
         existing_operation = self._unique_operations.get(ticket.uniqueId)
         if not existing_operation and isinstance(ticket, UploadTicket):
             raise FilerSerialException(
@@ -119,32 +110,61 @@ class EffectfulFilerServerOrchestrator(
     async def check_proof_of_knowledge_exn(self, proof: AuthenticatedProofOfKnowledgeRequestTicket[C, H, R, I, A, P, S]) -> AuthenticatedProofOfKnowledgeResponseTicket[C, H, R, I, A, S] | None:
         if proof.computedProof is None:
             return
-        async with proof.authenticatedRequest.signature:
-            pass
+        proof.authenticatedRequest.signature.check_signature_exn()
+        if proof.authenticatedRequest.object.validUntil > utc_now():
+            raise VerificationDelayElapsed()
         hash = proof.hash
-        with hash.compute_new() as h:
+        with proof.authenticatedRequest.object.computationProofAlgorithm.compute_new() as h:
             size = await self.size_for_hash_exn(hash)
             for offset in range(0, size, chunk_size):
                 h.update(await self.download_chunk_for_hash_exn(hash, offset, chunk_size))
-            return h.is_same(hash.hash)
+            return h.is_same(bytes(proof.computedProof))
 
 
     async def download_start_exn(self, hash: H) -> DownloadTicket[C, H, R, I]:
-        ...
+        raise NotCallableError  # TODO: change the exception as it does not mean this
 
     async def download_chunk_from_exn(self, download_ticket: DownloadTicket[C, H, R, I], offset: int, size: int) -> bytes:
-        ...
+        ticket_id = download_ticket.uniqueId
+        if ticket_id in self._terminated_operations:
+            raise FilerSerialException(
+                TerminatedOperation(
+                    operationId=download_ticket.uniqueId,
+                    operationType='download'
+                )
+            )
+        # TODO: check ticket constraints, merge constraints with filer server constraints (take the most constrained)
+        if not ticket_id in self._unique_operations:
+            self._unique_operations[ticket_id] = DownloadMonitoring()
+            # TODO: start download monitoring
+        return await self._server.download_chunk_from_exn(download_ticket.hash, offset, size)
 
     async def download_progress_at_exn(self, download_ticket: DownloadTicket[C, H, R, I]) -> OutputStreamInformation:
-        ...
+        await self._ensure_existing(download_ticket)
+        download_monitoring = self._unique_operations[download_ticket.uniqueId]
+        return await download_monitoring.current_progress()
 
     async def download_terminate_at_exn(self, download_ticket: DownloadTicket[C, H, R, I]) -> DownloadTicket[C, H, R, I] | bool:
-        ...
+        await self._ensure_existing(download_ticket)
+        self._terminated_operations.add(download_ticket.uniqueId)
+        download_monitoring = self._unique_operations[download_ticket.uniqueId]
+        download_monitoring.stop()
+        return True
 
 
     async def delete_resource_at_exn(self, deletion_ticket: DeleteContentTicket[C, H, R, I]) -> DeleteContentTicket[C, H, R, I] | bool:
-        ...
-
+        existing_metadata = await self._server.metadata_for_hash_exn(deletion_ticket.hash)
+        if not existing_metadata or existing_metadata is True:
+            FilerSerialException(
+                NotExistingContent(
+                    inputHash=deletion_ticket.hash,
+                    hasExisted=existing_metadata is True
+                )
+            )
+        # TODO instead:
+        # mark the resource as deleted (do not allow any new download for it)
+        # then suppress resource once all downloads are finished
+        return await self._server.delete_resource_at_exn(deletion_ticket.hash)
 
 
     # this is supposed to mix the BackendFailure and RegistryFailure
